@@ -1,0 +1,13 @@
+- Use pydantic BaseModel instead of `dict` whenever you can. Avoid using `dict` as a type hint, and instead use more specific types or pydantic models.
+- Do not use deprecated `typing.Dict` or `typing.List` types, and instead use the built-in `dict` and `list` types with proper type annotations.
+- Use uv as package manager
+- Use basedpyright "recommended" type checking along with ruff.
+- Do not read the .env file and app-config.yaml file directly.
+- Use beanie orm to manage the database connection and models, instead of using the 'motor' package. Do NOT write any functions to delete or update the database, you can only read from the database
+- Use `polars` for data manipulation and analysis instead of `pandas`
+- Avoid using `try`/`except` blocks if possible.
+- Avoid using `dict` as a type hint, and instead use more specific types or pydantic models to ensure better type safety and code clarity.
+- Avoid using type 'Any' if possible, except for some library functions that do not have proper type annotations.
+- Avoid using `Literal` types for string literals, and instead use `Enum` classes to define a set of allowed values for better readability and maintainability.
+- Do not use `list` or `dict` or `np.ndarray` as type hints without specifying the types of their elements.
+- Structure the code using dependency-injected service, repository, manager, and domain-model classes with strict separation of concerns, and avoid procedural modules or standalone functions except for small pure utilities.

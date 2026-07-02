@@ -1,0 +1,27 @@
+services:
+  klg-mongo:
+    image: mongo:8.3.4
+    ports:
+      - "${MONGO_PORT}:27017"
+    volumes:
+      - "klg_data:/data/db/"
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - klg-app
+
+networks:
+  klg-app:
+    name: klg-app-net
+    driver: bridge
+
+volumes:
+  klg_data:
+    name: klg-mongo
+    driver: local

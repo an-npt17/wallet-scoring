@@ -1,0 +1,8 @@
+database:
+  mongo:
+    host: "klg-mongo"
+    internal_port: 27017
+    external_port: "${MONGO_PORT}"
+    username: "${MONGO_INITDB_ROOT_USERNAME}"
+    password: "${MONGO_INITDB_ROOT_PASSWORD}"
+    database: "perpetuals_knowledge_graph"
