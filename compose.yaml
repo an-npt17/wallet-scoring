@@ -1,6 +1,6 @@
 services:
   klg-mongo:
-    image: mongo:8.3.4
+    image: mongo:7.0.37
     ports:
       - "${MONGO_PORT}:27017"
     volumes:

@@ -10,4 +10,43 @@ dependencies = [
   "numpy==2.5.0",
   "polars==1.42.1",
   "pydantic==2.13.4",
+  "python-dotenv==1.2.2",
+  "pyyaml==6.0.3",
+  "web3==7.16.0",
 ]
+
+[dependency-groups]
+dev = ["basedpyright==1.39.9", "pytest==9.1.1", "ruff==0.15.20"]
+
+[tool.ruff.lint]
+select = [
+  # Import sorting rules
+  "I",
+  # Pycodestyle rules (E, V)
+  "E",
+  # Tidy import rules
+  "TID",
+  # Perflint
+  "PERF",
+  # FastAPI specific rules
+  "FAST",
+]
+ignore = [
+  ### Intentionally disabled
+  # module level import not at top of file
+  "E402",
+  # line too long
+  "E501",
+  # do not assign a lambda expression, use a def
+  "E731",
+  # incorrect-dict-iterator, flags valid Series.items usage
+  "PERF102",
+  # try-except-in-loop, becomes useless in Python 3.11
+  "PERF203",
+]
+
+[tool.basedpyright]
+# if you want to add rules on allow untype libraries, you should add them to your own service's pyproject.toml
+typeCheckingMode = "recommended"
+reportAny = false
+reportExplicitAny = false
