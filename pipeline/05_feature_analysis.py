@@ -20,7 +20,7 @@ import logging
 
 import polars as pl
 
-from pipeline.config import BASELINES_PATH, FEATURES_PATH, LABELS_PATH
+from pipeline._paths import BASELINES_PATH, FEATURES_PATH, LABELS_PATH
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s  %(levelname)s  %(message)s"

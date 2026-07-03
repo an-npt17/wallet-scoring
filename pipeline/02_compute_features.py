@@ -13,7 +13,7 @@ import time
 
 import polars as pl
 
-from pipeline.config import FEATURES_PATH, MIN_TRADES_FILTER, POSITIONS_PATH
+from pipeline._paths import FEATURES_PATH, MIN_TRADES_FILTER, POSITIONS_PATH
 from src.features.skill_computer import SkillComputerService
 
 logging.basicConfig(

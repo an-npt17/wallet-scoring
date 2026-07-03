@@ -7,9 +7,7 @@ from config.settings import mongo_config
 
 
 class Client:
-    root: AsyncMongoClient[Any] = AsyncMongoClient(
-        mongo_config.LINK, uuidRepresentation="standard"
-    )
+    root: AsyncMongoClient[Any] = AsyncMongoClient(mongo_config.LINK)
     database: AsyncDatabase[Any] = root[mongo_config.DATABASE]
 
     def get_root(self) -> AsyncMongoClient[Any]:

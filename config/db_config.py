@@ -15,6 +15,6 @@ class MongoConfig:
     USERNAME: str = db_config.mongo.username
     PASSWORD: str = db_config.mongo.password
     HOST: str = db_config.mongo.host
-    PORT: int = db_config.mongo.internal_port
+    PORT: int = db_config.mongo.external_port
     LINK: str = f"mongodb://{USERNAME}:{PASSWORD}@{HOST}:{PORT}/"
     DATABASE: str = db_config.mongo.database

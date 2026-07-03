@@ -1,11 +1,15 @@
 """
-Reconstruct completed position lifecycle from raw log events (logs.json).
+Reconstruct completed position lifecycle via beanie/MongoDB server-side aggregation.
 
-Strategy:
-  - First Open event per positionKey → entry fields
-  - Last Close/Liquidate event per positionKey → exit fields
-  - Liquidate events counted per wallet; excluded from PnL reconstruction
-  - Positions without a matching Close/Liquidate are dropped (still open)
+Three parallel $group pipelines on the logs collection:
+  1. First Open event per positionKey → entry fields
+  2. Last Close/Liquidate event per positionKey → exit fields
+  3. Liquidate count per ownerAccount → liquidation_rate denominator
+
+All heavy sorting/grouping runs on MongoDB; only aggregated rows transferred.
+PnL derived locally in polars after join.
+
+Requires beanie initialized before use (call src.db.init_db() first).
 
 PnL approximation (entry-only):
   Long:  pnl = (exit_price - entry_price) / entry_price * entry_size_usd
@@ -13,81 +17,87 @@ PnL approximation (entry-only):
 
 Use closed_positions.realizedPnl for authoritative values (Stage 3).
 """
-
-from pathlib import Path
+import asyncio
 
 import polars as pl
 
+from database.mongo.schema import Log
 from src.features.schemas import LogAction
 
 _CLOSE_ACTIONS = [LogAction.CLOSE.value, LogAction.LIQUIDATE.value]
 
 
 class PositionBuilderService:
-    def __init__(self, data_path: Path) -> None:
-        self._data_path = data_path
-
-    def build(self) -> pl.DataFrame:
+    async def build(self) -> pl.DataFrame:
         """Return DataFrame with one row per matched Open→Close position."""
-        scan = pl.scan_ndjson(str(self._data_path))
-        opens = self._first_opens(scan)
-        closes = self._last_closes(scan)
-        liq_counts = self._liquidation_counts(scan)
+        opens_docs, closes_docs, liq_docs = await asyncio.gather(
+            self._fetch_first_opens(),
+            self._fetch_last_closes(),
+            self._fetch_liquidation_counts(),
+        )
+
+        opens = pl.from_dicts(opens_docs, infer_schema_length=500).rename({"_id": "positionKey"})
+        closes = pl.from_dicts(closes_docs, infer_schema_length=500).rename({"_id": "positionKey"})
+        liqs = pl.from_dicts(liq_docs, infer_schema_length=500).rename({"_id": "wallet"})
 
         return (
-            opens.join(closes, on="positionKey", how="inner")
-            .join(liq_counts, on="wallet", how="left")
+            opens
+            .join(closes, on="positionKey", how="inner")
+            .join(liqs, on="wallet", how="left")
             .with_columns(pl.col("n_liquidations").fill_null(0))
             .pipe(self._compute_derived)
-            .collect()
         )
 
-    def _first_opens(self, scan: pl.LazyFrame) -> pl.LazyFrame:
+    async def _fetch_first_opens(self) -> list[dict]:
+        return await Log.aggregate([
+            {"$match": {"action": LogAction.OPEN.value}},
+            {"$sort": {"timestamp": 1}},
+            {
+                "$group": {
+                    "_id": "$positionKey",
+                    "wallet": {"$first": "$ownerAccount"},
+                    "side": {"$first": "$side"},
+                    "asset": {"$first": "$asset"},
+                    "platform": {"$first": "$platform"},
+                    "chain": {"$first": "$chain"},
+                    "entry_price": {"$first": "$price"},
+                    "entry_size_usd": {"$first": "$sizeUsd"},
+                    "entry_collateral_usd": {"$first": "$collateralUsd"},
+                    "entry_leverage": {"$first": "$leverage"},
+                    "open_ts": {"$first": "$timestamp"},
+                }
+            },
+        ]).to_list()
+
+    async def _fetch_last_closes(self) -> list[dict]:
+        return await Log.aggregate([
+            {"$match": {"action": {"$in": _CLOSE_ACTIONS}}},
+            {"$sort": {"timestamp": 1}},
+            {
+                "$group": {
+                    "_id": "$positionKey",
+                    "exit_price": {"$last": "$price"},
+                    "close_ts": {"$last": "$timestamp"},
+                    "close_action": {"$last": "$action"},
+                }
+            },
+        ]).to_list()
+
+    async def _fetch_liquidation_counts(self) -> list[dict]:
+        return await Log.aggregate([
+            {"$match": {"action": LogAction.LIQUIDATE.value}},
+            {
+                "$group": {
+                    "_id": "$ownerAccount",
+                    "n_liquidations": {"$sum": 1},
+                }
+            },
+        ]).to_list()
+
+    def _compute_derived(self, df: pl.DataFrame) -> pl.DataFrame:
         return (
-            scan.filter(pl.col("action") == LogAction.OPEN.value)
-            .sort("timestamp")
-            .group_by("positionKey")
-            .agg(
-                [
-                    pl.first("ownerAccount").alias("wallet"),
-                    pl.first("side"),
-                    pl.first("asset"),
-                    pl.first("platform"),
-                    pl.first("chain"),
-                    pl.first("price").alias("entry_price"),
-                    pl.first("sizeUsd").alias("entry_size_usd"),
-                    pl.first("collateralUsd").alias("entry_collateral_usd"),
-                    pl.first("leverage").alias("entry_leverage"),
-                    pl.first("timestamp").alias("open_ts"),
-                ]
-            )
-        )
-
-    def _last_closes(self, scan: pl.LazyFrame) -> pl.LazyFrame:
-        return (
-            scan.filter(pl.col("action").is_in(_CLOSE_ACTIONS))
-            .sort("timestamp")
-            .group_by("positionKey")
-            .agg(
-                [
-                    pl.last("price").alias("exit_price"),
-                    pl.last("timestamp").alias("close_ts"),
-                    pl.last("action").alias("close_action"),
-                ]
-            )
-        )
-
-    def _liquidation_counts(self, scan: pl.LazyFrame) -> pl.LazyFrame:
-        return (
-            scan.filter(pl.col("action") == LogAction.LIQUIDATE.value)
-            .group_by("ownerAccount")
-            .agg(pl.len().alias("n_liquidations"))
-            .rename({"ownerAccount": "wallet"})
-        )
-
-    def _compute_derived(self, df: pl.LazyFrame) -> pl.LazyFrame:
-        return df.with_columns(
-            [
+            df
+            .with_columns([
                 pl.when(pl.col("side") == "Long")
                 .then(
                     (pl.col("exit_price") - pl.col("entry_price"))
@@ -100,16 +110,12 @@ class PositionBuilderService:
                     * pl.col("entry_size_usd")
                 )
                 .alias("pnl"),
-                (
-                    (pl.col("close_ts") - pl.col("open_ts")).cast(pl.Float64) / 3600.0
-                ).alias("duration_hours"),
-            ]
-        ).with_columns(
-            [
-                (
-                    pl.col("pnl")
-                    / pl.col("entry_collateral_usd").clip(lower_bound=1e-9)
-                ).alias("roi"),
+                ((pl.col("close_ts") - pl.col("open_ts")).cast(pl.Float64) / 3600.0)
+                .alias("duration_hours"),
+            ])
+            .with_columns([
+                (pl.col("pnl") / pl.col("entry_collateral_usd").clip(lower_bound=1e-9))
+                .alias("roi"),
                 (pl.col("pnl") > 0).alias("win"),
-            ]
+            ])
         )
