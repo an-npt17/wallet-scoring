@@ -13,11 +13,15 @@ Run:
 """
 import asyncio
 import logging
+from pathlib import Path
 
+import matplotlib.pyplot as plt
 import polars as pl
+from tqdm import tqdm
 
 from database.mongo.schema import ClosedPosition
 from pipeline._paths import LABELS_PATH, PROCESSED_DIR
+from pipeline._report import get_output_dir, save_fig, tee_stdout
 from src.db import init_db
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)s  %(message)s")
@@ -63,30 +67,47 @@ def _aggregate_wallet_labels(df: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-async def _run() -> None:
-    await init_db()
-
-    raw = await _fetch_closed_positions()
-    logger.info("Raw labels shape: %s", raw.shape)
-
+async def _run(out_dir: Path) -> None:
     raw_path = PROCESSED_DIR / "labels_raw.parquet"
-    raw.write_parquet(raw_path)
-    logger.info("Saved raw → %s", raw_path)
+    with tqdm(total=4, desc="Stage 3", unit="step", dynamic_ncols=True) as pbar:
+        pbar.set_postfix_str("init db")
+        await init_db()
+        pbar.update()
 
-    wallet_labels = _aggregate_wallet_labels(raw)
-    logger.info("Wallet-level labels: %s wallets", f"{len(wallet_labels):,}")
+        pbar.set_postfix_str("fetching closed_positions")
+        raw = await _fetch_closed_positions()
+        logger.info("Raw labels shape: %s", raw.shape)
+        pbar.update()
 
-    wallet_labels.write_parquet(LABELS_PATH)
-    logger.info("Saved → %s", LABELS_PATH)
+        pbar.set_postfix_str("aggregating wallet labels")
+        wallet_labels = _aggregate_wallet_labels(raw)
+        logger.info("Wallet-level labels: %s wallets", f"{len(wallet_labels):,}")
+        pbar.update()
+
+        pbar.set_postfix_str("saving parquet files")
+        raw.write_parquet(raw_path)
+        logger.info("Saved raw → %s", raw_path)
+        wallet_labels.write_parquet(LABELS_PATH)
+        logger.info("Saved → %s", LABELS_PATH)
+        pbar.update()
 
     wr = wallet_labels["realized_win_rate"].drop_nulls()
     print(f"\nLabel distribution (realized_win_rate):")
     print(f"  mean={wr.mean():.3f}  median={wr.median():.3f}  std={wr.std():.3f}")
     print(f"  wallets WR > 0.5: {(wr > 0.5).sum():,}")
 
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.hist(wr, bins=50)
+    ax.set_title("Ground-truth label distribution (realized_win_rate)")
+    ax.set_xlabel("realized_win_rate")
+    ax.set_ylabel("n wallets")
+    save_fig(fig, out_dir, "realized_win_rate_distribution.png")
+
 
 def main() -> None:
-    asyncio.run(_run())
+    out_dir = get_output_dir("03_fetch_labels")
+    with tee_stdout(out_dir):
+        asyncio.run(_run(out_dir))
 
 
 if __name__ == "__main__":

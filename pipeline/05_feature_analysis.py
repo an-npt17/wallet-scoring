@@ -17,10 +17,14 @@ Run:
 """
 
 import logging
+from pathlib import Path
 
+import matplotlib.pyplot as plt
 import polars as pl
+from tqdm import tqdm
 
 from pipeline._paths import BASELINES_PATH, FEATURES_PATH, LABELS_PATH
+from pipeline._report import get_output_dir, save_fig, tee_stdout
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s  %(levelname)s  %(message)s"
@@ -61,7 +65,7 @@ def _pearson(df: pl.DataFrame, col_a: str, col_b: str) -> float:
     sub = df.select([col_a, col_b]).drop_nulls()
     if len(sub) < 5:
         return float("nan")
-    return sub[col_a].pearson_corr(sub[col_b])
+    return pl.corr(sub[col_a], sub[col_b], eager=True).item()
 
 
 def _print_box(title: str) -> None:
@@ -71,10 +75,14 @@ def _print_box(title: str) -> None:
     print("╚" + "═" * width + "╝")
 
 
-def _print_correlations(df: pl.DataFrame, feature_cols: list[str]) -> None:
+def _print_correlations(
+    df: pl.DataFrame, feature_cols: list[str], desc: str = "correlations"
+) -> None:
     print(f"  {'Feature':<26} {'vs win_rate':>14} {'vs total_pnl':>14}")
     print("  " + "-" * 56)
-    for feat in feature_cols:
+    for feat in tqdm(
+        feature_cols, desc=desc, unit="feat", leave=False, dynamic_ncols=True
+    ):
         if feat not in df.columns:
             continue
         r_wr = (
@@ -90,7 +98,7 @@ def _print_correlations(df: pl.DataFrame, feature_cols: list[str]) -> None:
         print(f"  {feat:<26} {r_wr:>+14.3f} {r_pnl:>+14.3f}")
 
 
-def main() -> None:
+def _run(out_dir: Path) -> None:
     features = pl.read_parquet(FEATURES_PATH)
     labels = pl.read_parquet(LABELS_PATH)
     df = features.join(labels, on="wallet", how="inner")
@@ -110,8 +118,17 @@ def main() -> None:
 
     # ── Proposed feature correlations ────────────────────────────────────────
     _print_box("PROPOSED FEATURES × LABELS")
-    _print_correlations(df, _PROPOSED_FEATURES)
+    _print_correlations(df, _PROPOSED_FEATURES, desc="proposed features")
     print()
+
+    present_feats = [f for f in _PROPOSED_FEATURES if f in df.columns]
+    r_wrs = [_pearson(df, f, "realized_win_rate") for f in present_feats]
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.barh(present_feats, r_wrs)
+    ax.axvline(0, color="black", linewidth=1)
+    ax.set_title("Proposed features × realized_win_rate (Pearson r)")
+    ax.set_xlabel("r")
+    save_fig(fig, out_dir, "feature_correlations.png")
 
     # ── Side asymmetry quadrant ─────────────────────────────────────────────
     _print_box("SIDE ASYMMETRY QUADRANT COUNTS")
@@ -137,13 +154,27 @@ def main() -> None:
         print(f"  {label}: {n:>8,}  ({pct:.1f}%)")
     print()
 
+    quad_counts = [
+        int(
+            quad.filter(
+                (pl.col("long_skilled") == ls) & (pl.col("short_skilled") == ss)
+            ).height
+        )
+        for ls, ss in [(True, True), (True, False), (False, True), (False, False)]
+    ]
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.bar(["Q1 dual", "Q2 long-only", "Q3 short-only", "Q4 unskilled"], quad_counts)
+    ax.set_title("Side-asymmetry quadrant distribution")
+    ax.set_ylabel("n wallets")
+    save_fig(fig, out_dir, "quadrant_distribution.png")
+
     # ── Baseline comparison ──────────────────────────────────────────────────
     if BASELINES_PATH.exists():
         _print_box("BASELINE FEATURES × LABELS")
         baselines = pl.read_parquet(BASELINES_PATH)
         merged = df.join(baselines, on="wallet", how="inner")
         logger.info("Merged with baselines: %s wallets", f"{len(merged):,}")
-        _print_correlations(merged, _BASELINE_FEATURES)
+        _print_correlations(merged, _BASELINE_FEATURES, desc="baseline features")
         print()
 
     # ── Distribution summary ─────────────────────────────────────────────────
@@ -151,6 +182,12 @@ def main() -> None:
     numeric_feats = [c for c in _PROPOSED_FEATURES if c in features.columns]
     summary = features.select(numeric_feats).describe()
     print(summary)
+
+
+def main() -> None:
+    out_dir = get_output_dir("05_feature_analysis")
+    with tee_stdout(out_dir):
+        _run(out_dir)
 
 
 if __name__ == "__main__":

@@ -11,3 +11,5 @@
 - Avoid using `Literal` types for string literals, and instead use `Enum` classes to define a set of allowed values for better readability and maintainability.
 - Do not use `list` or `dict` or `np.ndarray` as type hints without specifying the types of their elements.
 - Structure the code using dependency-injected service, repository, manager, and domain-model classes with strict separation of concerns, and avoid procedural modules or standalone functions except for small pure utilities.
+- Anticipate which analyzing tasks might take a long time to run. Use tqdm and cache results when necessary.
+- Use `basedpyright` to check unknown methods when importing from library.

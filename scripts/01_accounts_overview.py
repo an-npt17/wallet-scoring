@@ -12,12 +12,16 @@ Run:
     uv run python scripts/01_accounts_overview.py
 """
 
+import argparse
 import asyncio
+from pathlib import Path
 
+import matplotlib.pyplot as plt
 import polars as pl
+from tqdm import tqdm
 
-from scripts._client import get_db
-
+from pipeline._report import get_output_dir, save_fig, tee_stdout
+from scripts._client import add_time_range_args, close_client, get_db, time_match_stage
 
 _SAMPLE_SIZE = 100_000
 _PROJECTION = {
@@ -48,24 +52,30 @@ def _percentiles(series: pl.Series, qs: list[float]) -> list[float]:
     return [series.quantile(q) or 0.0 for q in qs]
 
 
-async def main() -> None:
+async def main(args: argparse.Namespace, out_dir: Path) -> None:
     db = get_db()
     col = db["accounts"]
+    time_filter = time_match_stage("lastTradedAt", args.start, args.end)
 
-    # ── Total count ────────────────────────────────────────────────
-    total = await col.count_documents({})
-    _print_box("ACCOUNTS OVERVIEW")
-    print(f"  Total accounts:    {total:>12,}")
+    with tqdm(total=3, desc="01 accounts", unit="step", dynamic_ncols=True) as pbar:
+        pbar.set_postfix_str("counting documents")
+        total = await col.count_documents(time_filter)
+        _print_box("ACCOUNTS OVERVIEW")
+        print(f"  Total accounts:    {total:>12,}")
+        pbar.update()
 
-    # ── Sample for distribution analysis ──────────────────────────
-    cursor = col.aggregate(
-        [
+        pbar.set_postfix_str(f"sampling {_SAMPLE_SIZE:,} docs")
+        pipeline = ([{"$match": time_filter}] if time_filter else []) + [
             {"$sample": {"size": _SAMPLE_SIZE}},
             {"$project": _PROJECTION},
         ]
-    )
-    docs = await cursor.to_list()
-    df = pl.from_dicts(docs, infer_schema_length=500)
+        cursor = col.aggregate(pipeline)
+        docs = await cursor.to_list()
+        df = pl.from_dicts(docs, infer_schema_length=500)
+        pbar.update()
+
+        pbar.set_postfix_str("analysing distributions")
+        pbar.update()
 
     # ── Platform / chain breakdown ─────────────────────────────────
     print()
@@ -73,6 +83,13 @@ async def main() -> None:
     plat = df.group_by("platform").agg(pl.len().alias("n")).sort("n", descending=True)
     for row in plat.iter_rows():
         print(f"  {row[0]:<20s}  {row[1]:>8,}  ({row[1] / len(df) * 100:.1f}%)")
+
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.bar(plat["platform"].cast(pl.String), plat["n"])
+    ax.set_title("Accounts by platform (sample)")
+    ax.set_ylabel("n accounts")
+    ax.tick_params(axis="x", rotation=45)
+    save_fig(fig, out_dir, "platform_breakdown.png")
 
     print()
     _print_box("CHAIN BREAKDOWN (sample)")
@@ -96,6 +113,13 @@ async def main() -> None:
     print(f"  P99:                  ${qs[6]:>+12,.2f}")
     positive = (pnl > 0).sum()
     print(f"  Profitable accounts:  {positive:>8,}  ({positive / len(pnl) * 100:.1f}%)")
+
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.hist(pnl.clip(qs[0], qs[6]), bins=60)
+    ax.set_title("PnL distribution (clipped to P10-P99)")
+    ax.set_xlabel("PnL ($)")
+    ax.set_ylabel("n accounts")
+    save_fig(fig, out_dir, "pnl_distribution.png")
 
     # ── ROI statistics ─────────────────────────────────────────────
     print()
@@ -128,6 +152,13 @@ async def main() -> None:
         n = int(mask.sum())
         print(f"  {label:<10s}  {n:>7,}  ({n / len(wr) * 100:.1f}%)")
 
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.hist(wr, bins=50)
+    ax.set_title("Win-rate distribution (sample)")
+    ax.set_xlabel("profitableRatio")
+    ax.set_ylabel("n accounts")
+    save_fig(fig, out_dir, "win_rate_distribution.png")
+
     # ── Closed trade count distribution ───────────────────────────
     print()
     _print_box("CLOSED TRADE COUNT DISTRIBUTION")
@@ -152,6 +183,12 @@ async def main() -> None:
         multi = int((n_assets > 3).sum())
         print(f"  >3 assets:               {multi:>7,}  ({multi / len(df) * 100:.1f}%)")
 
+    await close_client()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    _parser = argparse.ArgumentParser(description=__doc__)
+    add_time_range_args(_parser)
+    _args = _parser.parse_args()
+    _out_dir = get_output_dir("01_accounts_overview")
+    with tee_stdout(_out_dir):
+        asyncio.run(main(_args, _out_dir))

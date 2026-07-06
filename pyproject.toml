@@ -8,10 +8,11 @@ dependencies = [
   "beanie==2.1.0",
   "matplotlib==3.11.0",
   "numpy==2.5.0",
-  "polars==1.42.1",
+  "polars[rt64]==1.42.1",
   "pydantic==2.13.4",
   "python-dotenv==1.2.2",
   "pyyaml==6.0.3",
+  "tqdm==4.68.3",
   "web3==7.16.0",
 ]
 

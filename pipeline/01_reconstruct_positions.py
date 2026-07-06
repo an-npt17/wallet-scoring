@@ -14,8 +14,13 @@ Run:
 import asyncio
 import logging
 import time
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+from tqdm import tqdm
 
 from pipeline._paths import POSITIONS_PATH
+from pipeline._report import get_output_dir, save_fig, tee_stdout
 from src.db import init_db
 from src.features.position_builder import PositionBuilderService
 
@@ -23,27 +28,41 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)s  %(me
 logger = logging.getLogger(__name__)
 
 
-async def _run() -> None:
-    await init_db()
+async def _run(out_dir: Path) -> None:
     t0 = time.perf_counter()
-    logger.info("Stage 1: Reconstruct positions from MongoDB logs collection")
+    with tqdm(total=3, desc="Stage 1", unit="step", dynamic_ncols=True) as pbar:
+        pbar.set_postfix_str("init db")
+        await init_db()
+        pbar.update()
 
-    positions = await PositionBuilderService().build()
+        pbar.set_postfix_str("reconstructing positions from logs")
+        positions = await PositionBuilderService().build()
+        elapsed = time.perf_counter() - t0
+        n_long = int((positions["side"] == "Long").sum())
+        n_short = int((positions["side"] == "Short").sum())
+        win_rate = float(positions["win"].mean() or 0.0)
+        logger.info(
+            "Reconstructed %s positions in %.1fs — Long %s  Short %s  WR %.3f",
+            f"{len(positions):,}", elapsed, f"{n_long:,}", f"{n_short:,}", win_rate,
+        )
+        pbar.update()
 
-    elapsed = time.perf_counter() - t0
-    logger.info("Reconstructed %s positions in %.1fs", f"{len(positions):,}", elapsed)
+        fig, ax = plt.subplots(figsize=(5, 4))
+        ax.bar(["Long", "Short"], [n_long, n_short])
+        ax.set_title("Reconstructed positions by side")
+        ax.set_ylabel("n positions")
+        save_fig(fig, out_dir, "positions_by_side.png")
 
-    n_long = int((positions["side"] == "Long").sum())
-    n_short = int((positions["side"] == "Short").sum())
-    win_rate = float(positions["win"].mean() or 0.0)
-    logger.info("Long: %s  Short: %s  Win rate: %.3f", f"{n_long:,}", f"{n_short:,}", win_rate)
-
-    positions.write_parquet(POSITIONS_PATH)
-    logger.info("Saved → %s  (%s rows)", POSITIONS_PATH, f"{len(positions):,}")
+        pbar.set_postfix_str(f"saving → {POSITIONS_PATH}")
+        positions.write_parquet(POSITIONS_PATH)
+        logger.info("Saved → %s  (%s rows)", POSITIONS_PATH, f"{len(positions):,}")
+        pbar.update()
 
 
 def main() -> None:
-    asyncio.run(_run())
+    out_dir = get_output_dir("01_reconstruct_positions")
+    with tee_stdout(out_dir):
+        asyncio.run(_run(out_dir))
 
 
 if __name__ == "__main__":

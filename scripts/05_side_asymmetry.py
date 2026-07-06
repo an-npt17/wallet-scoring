@@ -19,12 +19,16 @@ Run:
     uv run python scripts/05_side_asymmetry.py
 """
 
+import argparse
 import asyncio
+from pathlib import Path
 
+import matplotlib.pyplot as plt
 import polars as pl
+from tqdm import tqdm
 
-from scripts._client import get_db
-
+from pipeline._report import get_output_dir, save_fig, tee_stdout
+from scripts._client import add_time_range_args, close_client, get_db, time_match_stage
 
 _MIN_TRADES_PER_SIDE = 5
 
@@ -45,33 +49,32 @@ def _pearson_corr(a: pl.Series, b: pl.Series) -> float:
     return df["a"].pearson_corr(df["b"]) or 0.0
 
 
-async def main() -> None:
+async def main(args: argparse.Namespace, out_dir: Path) -> None:
     db = get_db()
     col = db["closed_positions"]
+    time_filter = time_match_stage("lastClosedAt", args.start, args.end)
 
-    total = await col.count_documents({})
-    _print_box("SIDE ASYMMETRY — LONG vs SHORT SKILL (RQ1 TEST)")
-    print(f"  Total closed positions:  {total:>12,}")
+    with tqdm(total=3, desc="05 side_asymmetry", unit="step", dynamic_ncols=True) as pbar:
+        pbar.set_postfix_str("counting documents")
+        total = await col.count_documents(time_filter)
+        _print_box("SIDE ASYMMETRY — LONG vs SHORT SKILL (RQ1 TEST)")
+        print(f"  Total closed positions:  {total:>12,}")
+        pbar.update()
 
-    # Load sample — large enough to get per-wallet per-side stats
-    cursor = col.aggregate(
-        [
+        pbar.set_postfix_str("sampling 300,000 docs")
+        pipeline = ([{"$match": time_filter}] if time_filter else []) + [
             {"$sample": {"size": 300_000}},
-            {
-                "$project": {
-                    "_id": 0,
-                    "ownerAccount": 1,
-                    "side": 1,
-                    "realizedPnl": 1,
-                    "asset": 1,
-                }
-            },
+            {"$project": {"_id": 0, "ownerAccount": 1, "side": 1, "realizedPnl": 1, "asset": 1}},
         ]
-    )
-    docs = await cursor.to_list()
-    df = pl.from_dicts(docs, infer_schema_length=500)
-    print(f"  Sample size:             {len(df):>12,}")
-    print()
+        cursor = col.aggregate(pipeline)
+        docs = await cursor.to_list()
+        df = pl.from_dicts(docs, infer_schema_length=500)
+        print(f"  Sample size:             {len(df):>12,}")
+        print()
+        pbar.update()
+
+        pbar.set_postfix_str("analysing side asymmetry")
+        pbar.update()
 
     # ── Global side comparison ─────────────────────────────────────
     _print_box("GLOBAL WIN RATE BY SIDE")
@@ -123,6 +126,13 @@ async def main() -> None:
         print(f"  Pearson r (Long WR vs Short WR):      {r_wr:>+8.3f}")
         print(f"  Pearson r (Long avgPnL vs Short PnL): {r_pnl:>+8.3f}")
         print()
+
+        fig, ax = plt.subplots(figsize=(6, 6))
+        ax.scatter(both["long_wr"], both["short_wr"], s=8, alpha=0.3)
+        ax.set_title(f"Long WR vs Short WR per wallet (r={r_wr:+.3f})")
+        ax.set_xlabel("Long win rate")
+        ax.set_ylabel("Short win rate")
+        save_fig(fig, out_dir, "long_vs_short_wr_scatter.png")
         if abs(r_wr) < 0.3:
             print("  ✓ LOW correlation → supports side-aware decomposition (Lim 2022)")
         else:
@@ -167,6 +177,15 @@ async def main() -> None:
         print("  If Q1 and Q3 dominate → skill is side-agnostic.")
         print()
 
+        fig, ax = plt.subplots(figsize=(6, 4))
+        ax.bar(
+            ["Q1 dual", "Q2 short-only", "Q3 neither", "Q4 long-only"],
+            [len(q1), len(q2), len(q3), len(q4)],
+        )
+        ax.set_title("Side-skill quadrant distribution")
+        ax.set_ylabel("n wallets")
+        save_fig(fig, out_dir, "skill_quadrants.png")
+
         # ── Top Long-only specialists ──────────────────────────────
         _print_box("LONG SPECIALISTS (top Long WR, below median Short WR)")
         long_spec = (
@@ -201,6 +220,12 @@ async def main() -> None:
             wallet, lwr, swr = row
             print(f"  {wallet:<44} {lwr:>8.2%} {swr:>10.2%}")
 
+    await close_client()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    _parser = argparse.ArgumentParser(description=__doc__)
+    add_time_range_args(_parser)
+    _args = _parser.parse_args()
+    _out_dir = get_output_dir("05_side_asymmetry")
+    with tee_stdout(_out_dir):
+        asyncio.run(main(_args, _out_dir))

@@ -12,12 +12,16 @@ Run:
     uv run python scripts/02_closed_positions_pnl.py
 """
 
+import argparse
 import asyncio
+from pathlib import Path
 
+import matplotlib.pyplot as plt
 import polars as pl
+from tqdm import tqdm
 
-from scripts._client import get_db
-
+from pipeline._report import get_output_dir, save_fig, tee_stdout
+from scripts._client import add_time_range_args, close_client, get_db, time_match_stage
 
 _SAMPLE_SIZE = 200_000
 _PROJECTION = {
@@ -70,28 +74,45 @@ def _pnl_stats(series: pl.Series, label: str) -> None:
     print()
 
 
-async def main() -> None:
+async def main(args: argparse.Namespace, out_dir: Path) -> None:
     db = get_db()
     col = db["closed_positions"]
+    time_filter = time_match_stage("lastClosedAt", args.start, args.end)
 
-    total = await col.count_documents({})
-    _print_box("CLOSED POSITIONS OVERVIEW")
-    print(f"  Total closed positions:  {total:>12,}")
+    with tqdm(total=3, desc="02 closed_positions", unit="step", dynamic_ncols=True) as pbar:
+        pbar.set_postfix_str("counting documents")
+        total = await col.count_documents(time_filter)
+        _print_box("CLOSED POSITIONS OVERVIEW")
+        print(f"  Total closed positions:  {total:>12,}")
+        pbar.update()
 
-    cursor = col.aggregate(
-        [
+        pbar.set_postfix_str(f"sampling {_SAMPLE_SIZE:,} docs")
+        pipeline = ([{"$match": time_filter}] if time_filter else []) + [
             {"$sample": {"size": _SAMPLE_SIZE}},
             {"$project": _PROJECTION},
         ]
-    )
-    docs = await cursor.to_list()
-    df = pl.from_dicts(docs, infer_schema_length=500)
-    print(f"  Sample size:             {len(df):>12,}")
-    print()
+        cursor = col.aggregate(pipeline)
+        docs = await cursor.to_list()
+        df = pl.from_dicts(docs, infer_schema_length=500)
+        print(f"  Sample size:             {len(df):>12,}")
+        print()
+        pbar.update()
+
+        pbar.set_postfix_str("analysing PnL distributions")
+        pbar.update()
 
     # ── Overall PnL ────────────────────────────────────────────────
     _print_box("PnL OVERALL")
     _pnl_stats(df["realizedPnl"], "ALL POSITIONS")
+
+    pnl_all = df["realizedPnl"].drop_nulls()
+    p1, p99 = pnl_all.quantile(0.01) or 0.0, pnl_all.quantile(0.99) or 0.0
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.hist(pnl_all.clip(p1, p99), bins=60)
+    ax.set_title("Realized PnL distribution (clipped to P1-P99)")
+    ax.set_xlabel("realizedPnl ($)")
+    ax.set_ylabel("n positions")
+    save_fig(fig, out_dir, "pnl_distribution.png")
 
     # ── By side (Long vs Short) — RQ1 test ────────────────────────
     _print_box("PnL BY SIDE — KEY METRIC FOR RQ1")
@@ -108,6 +129,13 @@ async def main() -> None:
     print(f"  Long win rate:    {long_wr:>8.2%}   (n={len(long_df):,})")
     print(f"  Short win rate:   {short_wr:>8.2%}   (n={len(short_df):,})")
     print(f"  Difference:       {long_wr - short_wr:>+8.2%}")
+
+    fig, ax = plt.subplots(figsize=(5, 4))
+    ax.bar(["Long", "Short"], [float(long_wr), float(short_wr)])
+    ax.set_title("Win rate by side")
+    ax.set_ylabel("win rate")
+    ax.set_ylim(0, 1)
+    save_fig(fig, out_dir, "win_rate_by_side.png")
     print()
     print("  NOTE: Long win rate = buy-side success;")
     print("        Short win rate ≈ sell-side timing skill.")
@@ -137,6 +165,13 @@ async def main() -> None:
             f"  {asset:<12} {n:>8,} {win_rate:>7.1%} ${mean_pnl:>+11,.2f} ${total_pnl:>+13,.0f}"
         )
     print()
+
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.bar(by_asset["asset"].cast(pl.String), by_asset["win_rate"])
+    ax.set_title("Win rate by asset (top 10 by volume)")
+    ax.set_ylabel("win rate")
+    ax.tick_params(axis="x", rotation=45)
+    save_fig(fig, out_dir, "win_rate_by_asset.png")
 
     # ── By platform ────────────────────────────────────────────────
     _print_box("PnL BY PLATFORM")
@@ -174,6 +209,12 @@ async def main() -> None:
         n = int(mask.sum())
         print(f"  {label:<22s}  {n:>8,}  ({n / total_n * 100:.1f}%)")
 
+    await close_client()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    _parser = argparse.ArgumentParser(description=__doc__)
+    add_time_range_args(_parser)
+    _args = _parser.parse_args()
+    _out_dir = get_output_dir("02_closed_positions_pnl")
+    with tee_stdout(_out_dir):
+        asyncio.run(main(_args, _out_dir))
