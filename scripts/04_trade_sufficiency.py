@@ -60,7 +60,7 @@ async def main(args: argparse.Namespace, out_dir: Path) -> None:
         pipeline = ([{"$match": time_filter}] if time_filter else []) + [
             {"$project": {"_id": 0, "closedPositionCount": 1, "platform": 1, "chain": 1}},
         ]
-        cursor = col.aggregate(pipeline)
+        cursor = await col.aggregate(pipeline)
         docs = await cursor.to_list()
         df = pl.from_dicts(docs, infer_schema_length=1000)
         trade_counts = df["closedPositionCount"].drop_nulls().cast(pl.Int64)

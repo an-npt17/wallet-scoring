@@ -46,7 +46,7 @@ def _pearson_corr(a: pl.Series, b: pl.Series) -> float:
     df = pl.DataFrame({"a": a, "b": b}).drop_nulls()
     if len(df) < 3:
         return float("nan")
-    return df["a"].pearson_corr(df["b"]) or 0.0
+    return pl.corr(df["a"], df["b"], eager=True).item() or 0.0
 
 
 async def main(args: argparse.Namespace, out_dir: Path) -> None:
@@ -54,7 +54,9 @@ async def main(args: argparse.Namespace, out_dir: Path) -> None:
     col = db["closed_positions"]
     time_filter = time_match_stage("lastClosedAt", args.start, args.end)
 
-    with tqdm(total=3, desc="05 side_asymmetry", unit="step", dynamic_ncols=True) as pbar:
+    with tqdm(
+        total=3, desc="05 side_asymmetry", unit="step", dynamic_ncols=True
+    ) as pbar:
         pbar.set_postfix_str("counting documents")
         total = await col.count_documents(time_filter)
         _print_box("SIDE ASYMMETRY — LONG vs SHORT SKILL (RQ1 TEST)")
@@ -64,9 +66,17 @@ async def main(args: argparse.Namespace, out_dir: Path) -> None:
         pbar.set_postfix_str("sampling 300,000 docs")
         pipeline = ([{"$match": time_filter}] if time_filter else []) + [
             {"$sample": {"size": 300_000}},
-            {"$project": {"_id": 0, "ownerAccount": 1, "side": 1, "realizedPnl": 1, "asset": 1}},
+            {
+                "$project": {
+                    "_id": 0,
+                    "ownerAccount": 1,
+                    "side": 1,
+                    "realizedPnl": 1,
+                    "asset": 1,
+                }
+            },
         ]
-        cursor = col.aggregate(pipeline)
+        cursor = await col.aggregate(pipeline)
         docs = await cursor.to_list()
         df = pl.from_dicts(docs, infer_schema_length=500)
         print(f"  Sample size:             {len(df):>12,}")
@@ -221,6 +231,7 @@ async def main(args: argparse.Namespace, out_dir: Path) -> None:
             print(f"  {wallet:<44} {lwr:>8.2%} {swr:>10.2%}")
 
     await close_client()
+
 
 if __name__ == "__main__":
     _parser = argparse.ArgumentParser(description=__doc__)

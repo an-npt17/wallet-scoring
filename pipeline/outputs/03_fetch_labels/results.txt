@@ -1,0 +1,4 @@
+
+Label distribution (realized_win_rate):
+  mean=0.470  median=0.500  std=0.399
+  wallets WR > 0.5: 163,652

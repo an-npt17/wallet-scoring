@@ -1,0 +1,53 @@
+╔══════════════════════════════════════════════════════════╗
+║  SIDE ASYMMETRY — LONG vs SHORT SKILL (RQ1 TEST)         ║
+╚══════════════════════════════════════════════════════════╝
+  Total closed positions:     1,342,059
+  Sample size:                  300,000
+
+╔══════════════════════════════════════════════════════════╗
+║  GLOBAL WIN RATE BY SIDE                                 ║
+╚══════════════════════════════════════════════════════════╝
+  Long    n= 178,619  win%=48.49%  avg=$  -44.02  med=$   -0.10
+  Short   n= 121,381  win%=47.26%  avg=$ +596.59  med=$   -0.34
+
+╔══════════════════════════════════════════════════════════╗
+║  WALLET-LEVEL LONG vs SHORT (min 5 each side)            ║
+╚══════════════════════════════════════════════════════════╝
+  Wallets with ≥5 each side:      748
+
+  Pearson r (Long WR vs Short WR):        +0.336
+  Pearson r (Long avgPnL vs Short PnL):   -0.233
+
+  ✗ HIGH correlation → sides may not be orthogonal in this data
+
+╔══════════════════════════════════════════════════════════╗
+║  SKILL QUADRANT ANALYSIS                                 ║
+╚══════════════════════════════════════════════════════════╝
+  Quadrant split at median Long WR=42.86%, Short WR=43.99%
+
+  Q1 (Good Long + Good Short):     252  (33.7%)
+  Q2 (Poor Long + Good Short):     122  (16.3%)
+  Q3 (Poor Long + Poor Short):     235  (31.4%)
+  Q4 (Good Long + Poor Short):     139  (18.6%)
+
+  If Q2 and Q4 are large → asymmetric skill exists.
+  If Q1 and Q3 dominate → skill is side-agnostic.
+
+╔══════════════════════════════════════════════════════════╗
+║  LONG SPECIALISTS (top Long WR, below median Short WR)   ║
+╚══════════════════════════════════════════════════════════╝
+  Wallet                                        Long WR   Short WR
+  0x623be944b2736208e6c8171819a0cff51791de80    100.00%     20.00%
+  0xc1fce740d83a60de67d039aa927a678ff78c202f    100.00%     16.67%
+  0x6fca119fd744845ea9bdbf8981dbc645f236fa58    100.00%     42.86%
+  0x3a03c75df10d3f18a212649ce0d28b03b108b812     87.50%     14.29%
+  0x0266a2451f715276eab4d1a0d6abece0b475af5f     85.71%     14.29%
+
+╔══════════════════════════════════════════════════════════╗
+║  SHORT SPECIALISTS (top Short WR, below median Long WR)  ║
+╚══════════════════════════════════════════════════════════╝
+  0xb7e09a94603f4fd3b67537b4c43584fe1498ae05     33.33%    100.00%
+  0x5559da6ec434c5723d0ce9c4da7f29e3f8a3d43b     40.00%    100.00%
+  0x051c2e6d49cf82ebc47f08f9b85800f94fc9693c     37.50%    100.00%
+  0xed29872296f400e4cada4cf9ac875db9acbd6a93      0.00%    100.00%
+  0x05ba873365e6e9a843605b678411de243f367d32     20.00%    100.00%

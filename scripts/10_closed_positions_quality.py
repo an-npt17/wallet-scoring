@@ -26,6 +26,8 @@ from tqdm import tqdm
 from pipeline._report import get_output_dir, save_fig, tee_stdout
 from scripts._client import add_time_range_args, close_client, get_db, time_match_stage
 
+_SAMPLE_SIZE = 200_000
+
 _PROJECTION_CP = {
     "_id": 0,
     "ownerAccount": 1,
@@ -78,13 +80,16 @@ async def main(args: argparse.Namespace, out_dir: Path) -> None:
         pbar.update()
 
         # ── Fetch closed_positions ──────────────────────────────────────
-        pbar.set_postfix_str(f"fetching all {total_cp:,} closed positions")
+        pbar.set_postfix_str(f"sampling {_SAMPLE_SIZE:,} closed positions")
         pipeline = ([{"$match": time_filter}] if time_filter else []) + [
-            {"$project": _PROJECTION_CP}
+            {"$sample": {"size": _SAMPLE_SIZE}},
+            {"$project": _PROJECTION_CP},
         ]
-        cursor = cp_col.aggregate(pipeline)
+        cursor = await cp_col.aggregate(pipeline)
         cp_docs = await cursor.to_list()
         cp = pl.from_dicts(cp_docs, infer_schema_length=1000)
+        print(f"  Sample size:           {len(cp):>12,}")
+        print()
         pbar.update()
 
         # ── realizedPnl quality ────────────────────────────────────────
@@ -127,15 +132,23 @@ async def main(args: argparse.Namespace, out_dir: Path) -> None:
         print()
         pbar.update()
 
-        # ── Per-wallet distribution ─────────────────────────────────────
-        pbar.set_postfix_str("per-wallet distribution + platform")
-        wallet_cp = (
-            cp.group_by("ownerAccount")
-            .agg([
-                pl.len().alias("n_closed"),
-                pl.col("realizedPnl").sum().alias("total_pnl"),
-                (pl.col("realizedPnl") > 0).mean().alias("win_rate"),
-            ])
+        # ── Per-wallet distribution (server-side $group) ─────────────
+        pbar.set_postfix_str("server-side $group per wallet")
+        group_pipeline = ([{"$match": time_filter}] if time_filter else []) + [
+            {
+                "$group": {
+                    "_id": "$ownerAccount",
+                    "n_closed": {"$sum": 1},
+                    "total_pnl": {"$sum": "$realizedPnl"},
+                    "n_win": {"$sum": {"$cond": [{"$gt": ["$realizedPnl", 0]}, 1, 0]}},
+                },
+            },
+            {"$project": {"_id": 0, "ownerAccount": "$_id", "n_closed": 1, "total_pnl": 1, "n_win": 1}},
+        ]
+        cursor = await cp_col.aggregate(group_pipeline)
+        group_docs = await cursor.to_list()
+        wallet_cp = pl.from_dicts(group_docs).with_columns(
+            (pl.col("n_win") / pl.col("n_closed")).alias("win_rate")
         )
         n_cp = wallet_cp["n_closed"]
 
@@ -186,7 +199,7 @@ async def main(args: argparse.Namespace, out_dir: Path) -> None:
         pbar.set_postfix_str("cross-checking accounts vs closed_positions")
         _print_box("CROSS-CHECK: accounts vs closed_positions")
 
-        acc_cursor = acc_col.aggregate([{"$project": _PROJECTION_ACC}])
+        acc_cursor = await acc_col.aggregate([{"$project": _PROJECTION_ACC}])
         acc_docs = await acc_cursor.to_list()
         acc = pl.from_dicts(acc_docs, infer_schema_length=500)
 

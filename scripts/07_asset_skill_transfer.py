@@ -48,7 +48,7 @@ def _pearson(a: pl.Series, b: pl.Series) -> float:
     combined = pl.DataFrame({"a": a, "b": b}).drop_nulls()
     if len(combined) < 5:
         return float("nan")
-    return combined["a"].pearson_corr(combined["b"]) or 0.0
+    return pl.corr(combined["a"], combined["b"], eager=True).item() or 0.0
 
 
 async def main(args: argparse.Namespace, out_dir: Path) -> None:
@@ -56,7 +56,9 @@ async def main(args: argparse.Namespace, out_dir: Path) -> None:
     col = db["closed_positions"]
     time_filter = time_match_stage("lastClosedAt", args.start, args.end)
 
-    with tqdm(total=3, desc="07 asset_transfer", unit="step", dynamic_ncols=True) as pbar:
+    with tqdm(
+        total=3, desc="07 asset_transfer", unit="step", dynamic_ncols=True
+    ) as pbar:
         pbar.set_postfix_str("counting documents")
         total = await col.count_documents(time_filter)
         _print_box("CROSS-ASSET SKILL TRANSFER ANALYSIS")
@@ -66,9 +68,17 @@ async def main(args: argparse.Namespace, out_dir: Path) -> None:
         pbar.set_postfix_str(f"sampling {_SAMPLE_SIZE:,} docs")
         pipeline = ([{"$match": time_filter}] if time_filter else []) + [
             {"$sample": {"size": _SAMPLE_SIZE}},
-            {"$project": {"_id": 0, "ownerAccount": 1, "asset": 1, "side": 1, "realizedPnl": 1}},
+            {
+                "$project": {
+                    "_id": 0,
+                    "ownerAccount": 1,
+                    "asset": 1,
+                    "side": 1,
+                    "realizedPnl": 1,
+                }
+            },
         ]
-        cursor = col.aggregate(pipeline)
+        cursor = await col.aggregate(pipeline)
         docs = await cursor.to_list()
         df = pl.from_dicts(docs, infer_schema_length=500)
         print(f"  Sample size:             {len(df):>12,}")
@@ -164,8 +174,10 @@ async def main(args: argparse.Namespace, out_dir: Path) -> None:
     )
     print("  " + "-" * 70)
 
-    pairs = [(a, b) for i, a in enumerate(top_assets) for b in top_assets[i + 1:]]
-    for asset_a, asset_b in tqdm(pairs, desc="  asset pairs", leave=False, dynamic_ncols=True):
+    pairs = [(a, b) for i, a in enumerate(top_assets) for b in top_assets[i + 1 :]]
+    for asset_a, asset_b in tqdm(
+        pairs, desc="  asset pairs", leave=False, dynamic_ncols=True
+    ):
         wrs_a = (
             wallet_asset_wr.filter(pl.col("asset") == asset_a)
             .select(["ownerAccount", "win_rate"])
@@ -194,6 +206,7 @@ async def main(args: argparse.Namespace, out_dir: Path) -> None:
     print("  r > 0.5 → skills generalize → single cross-asset score sufficient")
 
     await close_client()
+
 
 if __name__ == "__main__":
     _parser = argparse.ArgumentParser(description=__doc__)

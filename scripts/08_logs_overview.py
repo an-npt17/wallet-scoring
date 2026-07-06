@@ -68,7 +68,7 @@ async def main(args: argparse.Namespace, out_dir: Path) -> None:
     match_stage = [{"$match": time_filter}] if time_filter else []
 
     with tqdm(
-        total=5, desc="08 logs_overview", unit="step", dynamic_ncols=True
+        total=7, desc="08 logs_overview", unit="step", dynamic_ncols=True
     ) as pbar:
         # ── Totals ─────────────────────────────────────────────────────
         pbar.set_postfix_str("counting total + by action")
@@ -110,8 +110,8 @@ async def main(args: argparse.Namespace, out_dir: Path) -> None:
         pbar.update()
 
         # ── Time range ─────────────────────────────────────────────────
-        pbar.set_postfix_str("time range + unique counts")
-        time_cursor = await col.aggregate(
+        pbar.set_postfix_str("time range")
+        ts_cursor = await col.aggregate(
             match_stage
             + [
                 {
@@ -119,28 +119,51 @@ async def main(args: argparse.Namespace, out_dir: Path) -> None:
                         "_id": None,
                         "min_ts": {"$min": "$timestamp"},
                         "max_ts": {"$max": "$timestamp"},
-                        "unique_wallets": {"$addToSet": "$ownerAccount"},
-                        "unique_positions": {"$addToSet": "$positionKey"},
                     }
                 },
             ]
         )
-        time_rows = await time_cursor.to_list()
-        if time_rows:
-            t = time_rows[0]
-            min_ts, max_ts = t["min_ts"], t["max_ts"]
-            n_wallets = len(t["unique_wallets"])
-            n_positions = len(t["unique_positions"])
+        ts_rows = await ts_cursor.to_list()
+        min_ts = max_ts = span_days = 0
+        if ts_rows:
+            min_ts, max_ts = ts_rows[0]["min_ts"], ts_rows[0]["max_ts"]
             span_days = (max_ts - min_ts) / 86400 if min_ts and max_ts else 0
-
-            _print_box("TIME RANGE & UNIQUE COUNTS")
+            _print_box("TIME RANGE")
             print(f"  First event:       {_ts_to_date(min_ts)}  (ts={min_ts})")
             print(f"  Latest event:      {_ts_to_date(max_ts)}  (ts={max_ts})")
             print(f"  Span:              {span_days:.0f} days")
-            print(f"  Unique wallets:    {n_wallets:>12,}")
-            print(f"  Unique positionKeys:{n_positions:>11,}")
-            print(f"  Events/wallet avg: {total / n_wallets:.1f}")
             print()
+        pbar.update()
+
+        # ── Unique counts (separate pipelines to avoid $addToSet memory limit) ──
+        pbar.set_postfix_str("unique wallets")
+        wallet_cursor = await col.aggregate(
+            match_stage
+            + [
+                {"$group": {"_id": "$ownerAccount"}},
+                {"$count": "n"},
+            ]
+        )
+        wallet_rows = await wallet_cursor.to_list()
+        n_wallets = wallet_rows[0]["n"] if wallet_rows else 0
+        pbar.update()
+
+        pbar.set_postfix_str("unique positionKeys")
+        pos_cursor = await col.aggregate(
+            match_stage
+            + [
+                {"$group": {"_id": "$positionKey"}},
+                {"$count": "n"},
+            ]
+        )
+        pos_rows = await pos_cursor.to_list()
+        n_positions = pos_rows[0]["n"] if pos_rows else 0
+
+        _print_box("UNIQUE COUNTS")
+        print(f"  Unique wallets:     {n_wallets:>12,}")
+        print(f"  Unique positionKeys: {n_positions:>11,}")
+        print(f"  Events/wallet avg:  {total / n_wallets:.1f}" if n_wallets else "  N/A")
+        print()
         pbar.update()
 
         # ── Sample for distribution analysis ───────────────────────────

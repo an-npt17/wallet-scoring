@@ -1,0 +1,73 @@
+╔══════════════════════════════════════════════════════════════╗
+║  CLOSED POSITIONS — PIPELINE READINESS                       ║
+╚══════════════════════════════════════════════════════════════╝
+  closed_positions docs:     1,342,059
+  accounts docs:               455,752
+
+  Sample size:                200,000
+
+╔══════════════════════════════════════════════════════════════╗
+║  REALIZEDPNL COVERAGE (pipeline label quality)               ║
+╚══════════════════════════════════════════════════════════════╝
+  Total rows:                   200,000
+  realizedPnl not null:         200,000  (100.00%)
+  realizedPnl null:                   0  (0.00%)
+  realizedPnl == 0:                 418  (0.21%)
+  Median realizedPnl:      $       -0.21
+  Mean realizedPnl:        $     +411.80
+  Profitable positions:          95,759  (47.9%)
+
+  ⚠  PnL > $1M or < -$1M:     87 positions (data quality flag)
+
+╔══════════════════════════════════════════════════════════════╗
+║  CLOSURE TIME RANGE                                          ║
+╚══════════════════════════════════════════════════════════════╝
+  First closure:  2025-02-19
+  Latest closure: 2026-06-26
+  Span:           491 days
+  Unique wallets:  133,822
+
+╔══════════════════════════════════════════════════════════════╗
+║  CLOSED POSITIONS PER WALLET (label feasibility)             ║
+╚══════════════════════════════════════════════════════════════╝
+  Threshold     N wallets        %  Label
+  -------------------------------------------------------
+  ≥1              420,810   100.0%  any data
+  ≥5               67,755    16.1%  min for EDA
+  ≥10              16,157     3.8%  pipeline filter
+  ≥20               4,500     1.1%  Bayesian target
+  ≥50                 927     0.2%  reliable posterior
+  ≥100                326     0.1%  high confidence
+  ≥200                118     0.0%  elite
+
+╔══════════════════════════════════════════════════════════════╗
+║  PLATFORM COVERAGE                                           ║
+╚══════════════════════════════════════════════════════════════╝
+  Platform                  Positions    Wallets   Null PnL
+  ----------------------------------------------------------
+  hyperliquid                 104,455     72,118          0
+  jupiter                      54,171     46,835          0
+  apx-finance                  27,379      7,847          0
+  gmx-v2                       13,840      7,539          0
+  myx-finance                     155        126          0
+
+╔══════════════════════════════════════════════════════════════╗
+║  CROSS-CHECK: accounts vs closed_positions                   ║
+╚══════════════════════════════════════════════════════════════╝
+  Accounts total:                     455,752
+  Accounts WITH closed_positions:     424,899  (93.2%)
+  Accounts with NO cp records:         30,853  (6.8%)
+  Count exact match (acc vs cp):      151,251  of 424,899 comparable
+
+╔══════════════════════════════════════════════════════════════╗
+║  PIPELINE READINESS SUMMARY                                  ║
+╚══════════════════════════════════════════════════════════════╝
+  realizedPnl coverage:     100.0%  ✓ good
+  Wallets ≥10 closed pos:   16,157  (pipeline minimum)
+  Wallets ≥20 closed pos:   4,500  (Bayesian target)
+  Data span:                491 days
+
+  NEXT STEPS:
+  1. Run pipeline/01 → 04 to build features + labels parquets
+  2. Run pipeline/05 to check feature-label correlations
+  3. If wallet count <5k at ≥20 trades, lower threshold or expand data range

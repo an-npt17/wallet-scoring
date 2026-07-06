@@ -67,7 +67,7 @@ async def _load_sample(args: argparse.Namespace) -> pl.DataFrame:
         {"$sample": {"size": _SAMPLE_SIZE}},
         {"$project": _PROJECTION},
     ]
-    cursor = col.aggregate(pipeline)
+    cursor = await col.aggregate(pipeline)
     docs = await cursor.to_list()
     return pl.from_dicts(docs, infer_schema_length=1000)
 

@@ -41,6 +41,26 @@ async def _fetch_accounts() -> pl.DataFrame:
     docs = await Account.aggregate(
         [
             {
+                "$addFields": {
+                    "logsArray": {"$objectToArray": {"$ifNull": ["$logs", {}]}}
+                }
+            },
+            {
+                "$addFields": {
+                    "logsCount": {"$size": "$logsArray"},
+                    "logsSum": {"$sum": "$logsArray.v"},
+                    "logsSumSq": {
+                        "$sum": {
+                            "$map": {
+                                "input": "$logsArray",
+                                "as": "l",
+                                "in": {"$multiply": ["$$l.v", "$$l.v"]},
+                            }
+                        }
+                    },
+                }
+            },
+            {
                 "$project": {
                     "_id": 0,
                     "account": 1,
@@ -48,9 +68,11 @@ async def _fetch_accounts() -> pl.DataFrame:
                     "ROI": 1,
                     "profitableRatio": 1,
                     "closedPositionCount": 1,
-                    "logs": 1,
+                    "logsCount": 1,
+                    "logsSum": 1,
+                    "logsSumSq": 1,
                 }
-            }
+            },
         ]
     ).to_list()
 
@@ -67,24 +89,21 @@ async def _fetch_latest_rankings() -> list[dict]:
     return [t.model_dump() for t in traders]
 
 
-def _sharpe_from_logs(logs: object) -> float | None:
-    if not isinstance(logs, dict) or len(logs) < 5:
-        return None
-    values = list(logs.values())
-    n = len(values)
-    mean = sum(values) / n
-    variance = sum((v - mean) ** 2 for v in values) / max(n - 1, 1)
-    std = math.sqrt(variance)
-    if std < 1e-12:
-        return None
-    return mean / std * math.sqrt(365)
-
-
-def _build_sharpe_series(logs_col: pl.Series) -> pl.Series:
-    return pl.Series(
-        "b5_sharpe",
-        [_sharpe_from_logs(v) for v in tqdm(logs_col, desc="B5 Sharpe", unit="acct", dynamic_ncols=True)],
-        dtype=pl.Float64,
+def _add_sharpe_column(df: pl.DataFrame) -> pl.DataFrame:
+    mean = pl.col("logsSum") / pl.col("logsCount")
+    variance = (pl.col("logsSumSq") - pl.col("logsCount") * mean**2) / (
+        pl.col("logsCount") - 1
+    )
+    std = variance.sqrt()
+    return (
+        df.with_columns(mean.alias("_mean"), std.alias("_std"))
+        .with_columns(
+            pl.when((pl.col("logsCount") >= 5) & (pl.col("_std") > 1e-12))
+            .then(pl.col("_mean") / pl.col("_std") * math.sqrt(365))
+            .otherwise(None)
+            .alias("b5_sharpe")
+        )
+        .drop(["logsCount", "logsSum", "logsSumSq", "_mean", "_std"])
     )
 
 
@@ -101,11 +120,9 @@ async def _run(out_dir: Path) -> None:
         )
         pbar.update()
 
-        pbar.set_postfix_str("computing B5 Sharpe (per-account Python loop)")
-        b5 = _build_sharpe_series(accounts_df["logs"])
-        baselines = (
-            accounts_df.drop("logs")
-            .rename(
+        pbar.set_postfix_str("computing B5 Sharpe (vectorized)")
+        baselines = _add_sharpe_column(
+            accounts_df.rename(
                 {
                     "account": "wallet",
                     "PNL": "b2_pnl",
@@ -113,7 +130,6 @@ async def _run(out_dir: Path) -> None:
                     "profitableRatio": "b4_win_rate",
                 }
             )
-            .with_columns(b5)
         )
         if ranking_rows:
             b1 = (

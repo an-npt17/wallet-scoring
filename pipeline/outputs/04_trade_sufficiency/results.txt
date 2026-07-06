@@ -1,0 +1,59 @@
+╔════════════════════════════════════════════════════════╗
+║  BAYESIAN FEASIBILITY — TRADE COUNT ANALYSIS           ║
+╚════════════════════════════════════════════════════════╝
+  Total accounts:          455,752
+
+╔════════════════════════════════════════════════════════╗
+║  TRADE COUNT DISTRIBUTION                              ║
+╚════════════════════════════════════════════════════════╝
+  Mean:        43.7
+  Median:       3.0
+  P10 :           1
+  P25 :           1
+  P50 :           3
+  P75 :          13
+  P90 :          47
+  P95 :         100
+  P99 :         434
+  Max:      415,790
+
+╔════════════════════════════════════════════════════════╗
+║  BAYESIAN THRESHOLD ANALYSIS                           ║
+╚════════════════════════════════════════════════════════╝
+  Threshold  N wallets        %  Label
+  -----------------------------------------------------------------
+  ≥5          202,170    44.4%  Minimal  — posterior ~85% prior
+  ≥10         138,829    30.5%  Low      — posterior ~70% prior
+  ≥20          89,067    19.5%  Target   — posterior begins escaping prior
+  ≥50          43,549     9.6%  Good     — reliable 95% HPDI
+  ≥100         22,886     5.0%  Strong   — high-confidence posterior
+  ≥200         10,859     2.4%  Elite    — near-perfect estimation
+  ≥500          3,875     0.9%  Bot risk — likely algorithmic
+
+╔════════════════════════════════════════════════════════╗
+║  FEASIBILITY BY PLATFORM (≥20 trades threshold)        ║
+╚════════════════════════════════════════════════════════╝
+  Platform                N total      N ≥20    % ≥20  Median trades
+  ------------------------------------------------------------------
+  hyperliquid             239,625     43,161    18.0%              3
+  jupiter                 174,231     39,318    22.6%              4
+  gmx-v2                   21,649      5,023    23.2%              4
+  apx-finance              19,673      1,458     7.4%              2
+  myx-finance                 574        107    18.6%              3
+
+╔════════════════════════════════════════════════════════╗
+║  SHRINKAGE SIMULATION (illustrative)                   ║
+╚════════════════════════════════════════════════════════╝
+  Prior SD = 0.10 ROI, Observation SD = 0.20 ROI
+
+    N trades    Shrinkage   CI width (95%)
+  ----------------------------------------
+           5        0.444  ±        0.261
+          10        0.286  ±        0.210
+          20        0.167  ±        0.160
+          50        0.074  ±        0.107
+         100        0.038  ±        0.077
+         200        0.020  ±        0.055
+         500        0.008  ±        0.035
+
+  Shrinkage = fraction of posterior from prior (0=data, 1=prior)

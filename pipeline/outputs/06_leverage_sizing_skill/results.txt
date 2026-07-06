@@ -1,0 +1,54 @@
+╔══════════════════════════════════════════════════════════╗
+║  LEVERAGE & SIZING SKILL ANALYSIS                        ║
+╚══════════════════════════════════════════════════════════╝
+  Total log events in DB:    40,552,429
+  Sample rows loaded:       500,000
+
+  Open events:              268,169
+  Matched Open→Close:       168,192
+
+╔══════════════════════════════════════════════════════════╗
+║  LEVERAGE vs OUTCOME                                     ║
+╚══════════════════════════════════════════════════════════╝
+  Leverage          N     Win%    Avg ROI      Avg PnL
+  ----------------------------------------------------
+  <2x           5,683   47.8%    +0.68% $      +9.69
+  2-5x         13,924   51.7%    +3.03% $     +90.48
+  5-10x        14,895   51.1%    -0.48% $      +5.30
+  10-20x       35,461   55.3%   +53.25% $  +1,899.63
+  20-50x       71,970   49.6%    +7.46% $    +425.34
+  >50x         26,259   48.1%  -160.68% $    -258.17
+
+╔══════════════════════════════════════════════════════════╗
+║  SIZING SKILL (Van Loon 2018) PER WALLET                 ║
+╚══════════════════════════════════════════════════════════╝
+  Sizing skill = win_rate(large trades) - win_rate(small trades)
+  Positive = wallet bets bigger on winners (good sizing)
+  Negative = wallet bets bigger on losers (poor sizing / martingale)
+
+  Wallets with ≥10 trades:     2,902
+  Positive sizing skill:       1,176  (40.5%)
+  Negative sizing skill:       1,394  (48.0%)
+  Mean sizing skill:          -0.023
+  Median sizing skill:        +0.000
+
+  Distribution:
+    Strong negative (<-0.2)                  627  (21.6%)
+    Weak negative (-0.2 to -0.05)            609  (21.0%)
+    Neutral (-0.05 to +0.05)                 632  (21.8%)
+    Weak positive (+0.05 to +0.2)            584  (20.1%)
+    Strong positive (>+0.2)                  447  (15.4%)
+
+╔══════════════════════════════════════════════════════════╗
+║  DEPOSIT/WITHDRAW PATTERNS                               ║
+╚══════════════════════════════════════════════════════════╝
+  Total Deposit events:        5,918
+  Total Withdraw events:       4,224
+  Deposit/Withdraw ratio:       1.40
+  Avg deposit size:       $ +1,565.84
+  Wallets that deposit:        2,753
+  Wallets that withdraw:       1,418
+
+  NOTE: Deposits after a position opens = adding to a position
+        Persistent depositors may be averaging down (poor sizing).
+        This pattern needs cross-matching with subsequent PnL.

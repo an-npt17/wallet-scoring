@@ -91,7 +91,7 @@ async def main(args: argparse.Namespace, out_dir: Path) -> None:
             {"$sample": {"size": _SAMPLE_SIZE}},
             {"$project": _PROJECTION},
         ]
-        cursor = col.aggregate(pipeline)
+        cursor = await col.aggregate(pipeline)
         docs = await cursor.to_list()
         df = pl.from_dicts(docs, infer_schema_length=500)
         print(f"  Sample size:             {len(df):>12,}")

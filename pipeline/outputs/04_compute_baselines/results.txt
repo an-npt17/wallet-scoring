@@ -1,0 +1,7 @@
+
+Baseline non-null coverage:
+  b1_composite      :         20
+  b2_pnl            :    455,752
+  b3_roi            :    455,752
+  b4_win_rate       :    455,752
+  b5_sharpe         :    107,212

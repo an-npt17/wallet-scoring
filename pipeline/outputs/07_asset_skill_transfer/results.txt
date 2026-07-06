@@ -1,0 +1,51 @@
+╔════════════════════════════════════════════════════════════╗
+║  CROSS-ASSET SKILL TRANSFER ANALYSIS                       ║
+╚════════════════════════════════════════════════════════════╝
+  Total closed positions:     1,342,059
+  Sample size:                  300,000
+
+╔════════════════════════════════════════════════════════════╗
+║  WALLET ASSET COVERAGE                                     ║
+╚════════════════════════════════════════════════════════════╝
+  1 asset(s):    138,237  (76.7%)
+  2 asset(s):     28,175  (15.6%)
+  3 asset(s):      7,690  (4.3%)
+  4 asset(s):      2,765  (1.5%)
+  5 asset(s):      1,379  (0.8%)
+  >5 assets:      2,086  (1.2%)
+
+╔════════════════════════════════════════════════════════════╗
+║  WIN RATE BY ASSET (top 10)                                ║
+╚════════════════════════════════════════════════════════════╝
+  Asset               N     Win%      Avg PnL
+  --------------------------------------------
+  BTC            99,244   47.6% $    +353.61
+  SOL            73,255   45.5% $    -428.12
+  ETH            50,094   50.7% $  +1,206.92
+  XRP             9,376   52.5% $    +973.60
+  HYPE            9,189   51.1% $    -390.96
+  BNB             5,601   51.3% $      +3.89
+  DOGE            5,214   51.5% $    +301.66
+  ZEC             3,534   50.0% $    -486.00
+  FARTCOIN        2,366   47.8% $    -655.84
+  SUI             2,043   46.1% $     -39.02
+
+╔════════════════════════════════════════════════════════════╗
+║  CROSS-ASSET SKILL CORRELATION                             ║
+╚════════════════════════════════════════════════════════════╝
+  (wallets with ≥5 trades in BOTH assets)
+
+  Top assets analyzed: ['BTC', 'SOL', 'ETH', 'XRP', 'HYPE']
+
+  Asset A      Asset B       N wallets    Pearson r  Interpretation
+  ----------------------------------------------------------------------
+  BTC          SOL                  27       +0.375  Weak transfer
+  BTC          ETH                  90       +0.562  Strong transfer
+  BTC          XRP                   9       +0.477  Weak transfer
+  SOL          ETH                  17       +0.707  Strong transfer
+  SOL          XRP                   8       +0.554  Strong transfer
+  ETH          XRP                   7       +0.891  Strong transfer
+
+  RESEARCH HYPOTHESIS:
+  r < 0.3 → skills are asset-specific → asset-conditional scoring needed
+  r > 0.5 → skills generalize → single cross-asset score sufficient
