@@ -1,0 +1,13 @@
+╔════════════════════════════════════════════════════════════╗
+║  B6 — zScore REIMPLEMENTATION (rule-based, no NN — see docstring)║
+╚════════════════════════════════════════════════════════════╝
+  Wallets scored:            48,660
+  Wallets with future labels: 1,231
+
+  Blueprint component means:
+    volume             mean=525603.5213
+    frequency          mean=0.9578
+    holding_time       mean=780.1669
+    liquidation_rate   mean=0.8112
+
+  Saved -> data/processed/zscore_baseline.parquet

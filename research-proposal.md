@@ -139,8 +139,10 @@ All baselines are computable from the existing `perpetuals_knowledge_graph` DB:
 | **B4 — Win-rate rank** | `accounts.profitableRatio` | `sort(profitableRatio, descending)` |
 | **B5 — Sharpe ratio** | `accounts.logs` daily series | `mean(daily_pnl) / std(daily_pnl) * sqrt(365)` |
 | **B6 — zScore (Anon et al., 2025)** | Reimplement on perp data | ML composite from arXiv:2507.20494 |
+| **B7 — Sign-randomization skill classifier (Gomez-Cram et al., 2026)** | `positions.parquet` `win` column, per-wallet trade sequence | Permutation test on directional-accuracy persistence, arXiv:2605.02287. Original code/labels unreleased — reproduced from paper description, validated on the public Polymarket-v1 dataset (arXiv:2606.04217) as a cross-domain sanity check before running on our perp data. |
+| **B8 — Wash-trade / bot flag (Ashfaq, 2023)** | `positionKey` Open/Close sequences | Graph heuristic for colluding rapid buy-sell cycles, arXiv:2305.01543, adapted from public reference implementation (github.com/Dreamerryao/nft-wash-trading). Used as a pre-filter (exclude flagged wallets) rather than a ranking baseline — addresses the manipulation-robustness gap raised by Gao et al. (2026). |
 
-B1–B5 are directly extractable from the DB. B6 requires reimplementation on perp events (the original uses Uniswap v3 swap data).
+B1–B5 are directly extractable from the DB. B6 requires reimplementation on perp events (the original uses Uniswap v3 swap data). B7 and B8 require no new data — both operate on fields already in `positions.parquet` — but their original code/labels are unreleased (B7) or third-party/unofficial (B8), so both must be implemented from the paper's method description rather than adapted from an authoritative reference.
 
 ______________________________________________________________________
 

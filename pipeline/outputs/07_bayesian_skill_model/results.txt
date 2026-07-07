@@ -1,0 +1,37 @@
+╔════════════════════════════════════════════════════════════╗
+║  BAYESIAN MODEL — TRAIN/TEST SPLIT                         ║
+╚════════════════════════════════════════════════════════════╝
+  Holdout window:     last 45 days
+  Train positions:       1,041,891
+  Test positions:          114,557
+
+╔════════════════════════════════════════════════════════════╗
+║  DIMENSION: BUY (long_win_rate)                            ║
+╚════════════════════════════════════════════════════════════╝
+  N wallets:            16,659
+  mu (population):      0.4689
+  tau2 (between-wallet variance):   0.034791
+  Mean shrinkage toward prior:        0.3855
+
+╔════════════════════════════════════════════════════════════╗
+║  DIMENSION: SELL (short_win_rate)                          ║
+╚════════════════════════════════════════════════════════════╝
+  N wallets:             8,429
+  mu (population):      0.4777
+  tau2 (between-wallet variance):   0.031450
+  Mean shrinkage toward prior:        0.4046
+
+╔════════════════════════════════════════════════════════════╗
+║  DIMENSION: TIMING (overall_win_rate)                      ║
+╚════════════════════════════════════════════════════════════╝
+  N wallets:            48,660
+  mu (population):      0.4823
+  tau2 (between-wallet variance):   0.006096
+  Mean shrinkage toward prior:        0.7863
+
+╔════════════════════════════════════════════════════════════╗
+║  COMBINED bayes_score (equal-weighted z-scores)            ║
+╚════════════════════════════════════════════════════════════╝
+  Wallets with combined score + future labels: 1,231
+  Saved -> data/processed/bayesian_scores.parquet
+

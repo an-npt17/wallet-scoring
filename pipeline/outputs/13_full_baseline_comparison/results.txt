@@ -1,0 +1,37 @@
+╔══════════════════════════════════════════════════════════════════╗
+║  FULL COMPARISON (all wallets, RQ4)                              ║
+╚══════════════════════════════════════════════════════════════════╝
+  Wallets in this comparison: 1,348
+
+  Score             Spearman WR  Spearman PnL   Hit rate  Note
+  --------------------------------------------------------------------------
+  bayes_score            +0.109        +0.033     46.7%  
+  b1_composite             +nan          +nan      nan%  only top-20 wallets/snapshot have coverage
+  b2_pnl                 +0.106        +0.030     47.8%  
+  b3_roi                 +0.142        +0.051     52.2%  
+  b4_win_rate            +0.072        -0.029     40.4%  
+  b5_sharpe              +0.075        -0.022     37.5%  
+  b6_zscore              +0.125        +0.015     32.4%  
+  b7_score               +0.131        +0.058     46.3%  
+
+  B8 excludes 29 wallets flagged as likely wash/bot traders.
+
+╔══════════════════════════════════════════════════════════════════╗
+║  ROBUSTNESS CHECK (B8 wash-trade-flagged wallets excluded)       ║
+╚══════════════════════════════════════════════════════════════════╝
+  Wallets in this comparison: 1,319
+
+  Score             Spearman WR  Spearman PnL   Hit rate  Note
+  --------------------------------------------------------------------------
+  bayes_score            +0.090        +0.034     45.9%  
+  b1_composite             +nan          +nan      nan%  only top-20 wallets/snapshot have coverage
+  b2_pnl                 +0.107        +0.030     47.4%  
+  b3_roi                 +0.146        +0.052     54.1%  
+  b4_win_rate            +0.061        -0.028     41.4%  
+  b5_sharpe              +0.078        -0.022     37.8%  
+  b6_zscore              +0.155        +0.015     38.3%  
+  b7_score               +0.113        +0.059     45.9%  
+
+  B6/B7 are computed on the train window only (like bayes_score); B2-B5 use full
+  account history (a slight information advantage). B1 coverage is 20 wallets —
+  read with that caveat, not as a fair full-population baseline.

@@ -1,0 +1,10 @@
+╔════════════════════════════════════════════════════════════╗
+║  B8 — WASH-TRADE / BOT PRE-FILTER                          ║
+╚════════════════════════════════════════════════════════════╝
+  Wallets evaluated:  57,013
+  Flag rule: median duration < 1.0h AND n_trades >= 20
+  Flagged as likely wash/bot: 1,079 (1.89%)
+  Reference: Ashfaq (2023) flags 0.11% of wallets in NFT markets
+  (different market structure — see docstring adaptation note).
+
+  Saved -> data/processed/wash_trade_flags.parquet

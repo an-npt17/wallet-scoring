@@ -1,0 +1,10 @@
+╔════════════════════════════════════════════════════════════╗
+║  B7 — SIGN-RANDOMIZATION SKILL CLASSIFIER                  ║
+╚════════════════════════════════════════════════════════════╝
+  Wallets tested:            48,660
+  Population base win rate:  0.4642
+  Flagged 'skilled winners' (p<0.05): 1,634 (3.36%)
+  Reference: Gomez-Cram et al. (2026) flag 3.14% on Polymarket.
+
+  Wallets with future labels: 1,231
+  Saved -> data/processed/sign_randomization_scores.parquet

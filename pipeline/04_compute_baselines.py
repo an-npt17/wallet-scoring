@@ -91,14 +91,24 @@ async def _fetch_latest_rankings() -> list[dict]:
 
 def _add_sharpe_column(df: pl.DataFrame) -> pl.DataFrame:
     mean = pl.col("logsSum") / pl.col("logsCount")
-    variance = (pl.col("logsSumSq") - pl.col("logsCount") * mean**2) / (
-        pl.col("logsCount") - 1
-    )
+    # Floating-point cancellation can push this slightly negative for
+    # near-constant series; clip before sqrt so std is never NaN.
+    variance = (
+        (pl.col("logsSumSq") - pl.col("logsCount") * mean**2)
+        / (pl.col("logsCount") - 1)
+    ).clip(lower_bound=0.0)
     std = variance.sqrt()
     return (
         df.with_columns(mean.alias("_mean"), std.alias("_std"))
         .with_columns(
-            pl.when((pl.col("logsCount") >= 5) & (pl.col("_std") > 1e-12))
+            # `NaN > 1e-12` is `true` under polars' total-order comparison
+            # (unlike IEEE754), so `is_finite()` is required to actually
+            # exclude NaN/inf std values from the guard.
+            pl.when(
+                (pl.col("logsCount") >= 5)
+                & (pl.col("_std") > 1e-12)
+                & pl.col("_std").is_finite()
+            )
             .then(pl.col("_mean") / pl.col("_std") * math.sqrt(365))
             .otherwise(None)
             .alias("b5_sharpe")

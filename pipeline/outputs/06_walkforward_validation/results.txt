@@ -12,16 +12,16 @@ Wallets scored (>= 5 train trades, >= 5 future trades): 1,231
 ╚════════════════════════════════════════════════════════════╝
   Feature                      vs future_WR  vs future_PnL
   --------------------------------------------------------
-  long_win_rate                      +0.054         +0.030
-  short_win_rate                     +0.037         +0.001
-  side_asymmetry                     +0.012         +0.018
-  overall_win_rate                   +0.110         +0.006 (naive baseline)
-  avg_roi                            +0.057         +0.003 (naive baseline)
-  total_pnl                          -0.039         +0.102 (naive baseline)
-  leverage_adj_roi                   +0.055         +0.003
-  mean_leverage                      -0.101         +0.001
-  sizing_skill                       -0.050         +0.009
-  liquidation_rate                   -0.108         -0.001
-  n_trades                           -0.086         -0.002
-  trade_frequency_per_day            +0.002         +0.000
+  long_win_rate                      +0.054         +0.041
+  short_win_rate                     +0.037         +0.018
+  side_asymmetry                     +0.012         +0.012
+  overall_win_rate                   +0.110         +0.025 (naive baseline)
+  avg_roi                            +0.057         +0.005 (naive baseline)
+  total_pnl                          -0.039         +0.074 (naive baseline)
+  leverage_adj_roi                   +0.055         +0.005
+  mean_leverage                      -0.101         -0.001
+  sizing_skill                       -0.050         -0.013
+  liquidation_rate                   -0.108         -0.004
+  n_trades                           -0.086         -0.006
+  trade_frequency_per_day            +0.002         -0.002
 

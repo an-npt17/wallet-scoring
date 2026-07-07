@@ -143,7 +143,7 @@ async def main(args: argparse.Namespace, out_dir: Path) -> None:
         print("  (Near-zero = orthogonal dimensions; high = redundant scoring)")
         print()
         comp_cols = [c for c, _ in components if c in df.columns]
-        comp_labels = {c: l for c, l in components}
+        comp_labels = {c: label for c, label in components}
         header_labels = [comp_labels[c][:14] for c in comp_cols]
         print(f"  {'':28}", end="")
         for lbl in header_labels:
@@ -209,6 +209,7 @@ async def main(args: argparse.Namespace, out_dir: Path) -> None:
         pbar.update()
 
     await close_client()
+
 
 if __name__ == "__main__":
     _parser = argparse.ArgumentParser(description=__doc__)

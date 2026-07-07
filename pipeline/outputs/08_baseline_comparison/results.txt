@@ -1,0 +1,39 @@
+╔════════════════════════════════════════════════════════════════╗
+║  B1-B5 BASELINE COMPARISON (out-of-sample, RQ4)                ║
+╚════════════════════════════════════════════════════════════════╝
+  Wallets with future labels: 1,348
+
+╔════════════════════════════════════════════════════════════════╗
+║  SPEARMAN RANK CORRELATION vs FUTURE PERFORMANCE               ║
+╚════════════════════════════════════════════════════════════════╝
+  Score                  vs future_WR  vs future_PnL  Note
+  ----------------------------------------------------------------------
+  bayes_score                  +0.109         +0.033  
+  posterior_buy                +0.084         +0.040  
+  posterior_sell               +0.145         +0.027  
+  posterior_timing             +0.134         +0.060  
+  b1_composite                   +nan           +nan  only top-20 wallets/snapshot have coverage
+  b2_pnl                       +0.106         +0.030  
+  b3_roi                       +0.142         +0.051  
+  b4_win_rate                  +0.072         -0.029  
+  b5_sharpe                    +0.075         -0.022  
+
+╔════════════════════════════════════════════════════════════════╗
+║  TOP-DECILE HIT RATE (% above population median future_WR)     ║
+╚════════════════════════════════════════════════════════════════╝
+  Score                  Hit rate    N wallets
+  ----------------------------------------------
+  bayes_score              46.7%        1,348
+  posterior_buy            41.0%          956
+  posterior_sell           45.9%          674
+  posterior_timing         46.9%        1,348
+  b1_composite              nan%            0
+  b2_pnl                   47.8%        1,348
+  b3_roi                   52.2%        1,348
+  b4_win_rate              40.4%        1,348
+  b5_sharpe                37.5%        1,188
+
+  B6 (zScore, arXiv:2507.20494) — NOT implemented, excluded from this comparison.
+  B2-B5 use full account history; bayes_score/posterior_* use train-window only
+  (a slight information disadvantage for the proposed method in this comparison).
+

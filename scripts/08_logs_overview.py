@@ -21,7 +21,9 @@ import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
 
+import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
+import numpy as np
 import polars as pl
 from tqdm import tqdm
 
@@ -68,7 +70,7 @@ async def main(args: argparse.Namespace, out_dir: Path) -> None:
     match_stage = [{"$match": time_filter}] if time_filter else []
 
     with tqdm(
-        total=7, desc="08 logs_overview", unit="step", dynamic_ncols=True
+        total=8, desc="08 logs_overview", unit="step", dynamic_ncols=True
     ) as pbar:
         # ── Totals ─────────────────────────────────────────────────────
         pbar.set_postfix_str("counting total + by action")
@@ -106,6 +108,166 @@ async def main(args: argparse.Namespace, out_dir: Path) -> None:
         print()
         print(f"  Open/Close ratio:  {ratio:.3f}  (healthy ≈ 1.0)")
         print(f"  Liquidation rate:  {liq_rate:.2f}%  of opens")
+        print()
+        pbar.update()
+
+        # ── Events over time ────────────────────────────────────────────
+        pbar.set_postfix_str("events over time")
+        daily_cursor = await col.aggregate(
+            match_stage
+            + [
+                {
+                    "$group": {
+                        "_id": {
+                            "day": {
+                                "$subtract": [
+                                    "$timestamp",
+                                    {"$mod": ["$timestamp", 86400]},
+                                ]
+                            },
+                            "action": "$action",
+                        },
+                        "n": {"$sum": 1},
+                    }
+                },
+                {"$sort": {"_id.day": 1}},
+            ]
+        )
+        daily_rows = await daily_cursor.to_list()
+        daily_df = pl.from_dicts(
+            [
+                {"day": r["_id"]["day"], "action": r["_id"]["action"], "n": r["n"]}
+                for r in daily_rows
+            ]
+        )
+        pivot_df = (
+            daily_df.pivot(
+                index="day", columns="action", values="n", aggregate_function="first"
+            )
+            .fill_null(0)
+            .sort("day")
+        )
+
+        known_actions = ["Open", "Close", "Deposit", "Withdraw", "Liquidate"]
+        for a in known_actions:
+            if a not in pivot_df.columns:
+                pivot_df = pivot_df.with_columns(pl.lit(0, dtype=pl.Int64).alias(a))
+
+        day_ts = pivot_df["day"].to_numpy()
+        day_dates = [datetime.fromtimestamp(int(ts), tz=timezone.utc) for ts in day_ts]
+        colors = plt.cm.Set2.colors
+
+        _print_box("EVENTS OVER TIME")
+        print(f"  Days with data:          {len(pivot_df):>10,}")
+        print(
+            f"  Total events in range:   {pivot_df.select(pl.sum_horizontal(known_actions)).sum().item():>10,}"
+        )
+        print()
+
+        # Daily stacked bar chart
+        fig, ax = plt.subplots(figsize=(12, 5))
+        bottom = np.zeros(len(pivot_df))
+        for i, a in enumerate(known_actions):
+            vals = pivot_df[a].to_numpy()
+            ax.bar(
+                day_dates,
+                vals,
+                bottom=bottom,
+                label=a,
+                width=1,
+                color=colors[i],
+                edgecolor="white",
+                linewidth=0.3,
+            )
+            bottom += vals
+        ax.set_title("Daily log events by action type")
+        ax.set_ylabel("n events")
+        ax.legend()
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+        fig.autofmt_xdate()
+        save_fig(fig, out_dir, "events_over_time_daily.png")
+
+        # Weekly line chart
+        weekly_df = (
+            pivot_df.with_columns(
+                ((pl.col("day") // (86400 * 7)) * 86400 * 7).alias("week")
+            )
+            .group_by("week", maintain_order=True)
+            .agg([pl.col(a).sum().alias(a) for a in known_actions])
+            .sort("week")
+        )
+        week_ts = weekly_df["week"].to_numpy()
+        week_dates = [datetime.fromtimestamp(int(ts), tz=timezone.utc) for ts in week_ts]
+        fig2, ax2 = plt.subplots(figsize=(12, 5))
+        for i, a in enumerate(known_actions):
+            ax2.plot(
+                week_dates,
+                weekly_df[a].to_numpy(),
+                label=a,
+                color=colors[i],
+                linewidth=1.5,
+            )
+        ax2.set_title("Weekly log events by action type")
+        ax2.set_ylabel("n events")
+        ax2.legend()
+        ax2.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+        fig2.autofmt_xdate()
+        save_fig(fig2, out_dir, "events_over_time_weekly.png")
+
+        # Action composition (normalized %)
+        fig3, ax3 = plt.subplots(figsize=(12, 5))
+        action_matrix = pivot_df.select(known_actions).to_numpy()
+        row_totals = action_matrix.sum(axis=1, keepdims=True)
+        pct_matrix = np.divide(action_matrix, row_totals, where=row_totals > 0) * 100
+        pct_bottom = np.zeros(len(pivot_df))
+        for i, a in enumerate(known_actions):
+            ax3.fill_between(
+                day_dates,
+                pct_bottom,
+                pct_bottom + pct_matrix[:, i],
+                label=a,
+                color=colors[i],
+                alpha=0.7,
+                step="mid",
+            )
+            pct_bottom += pct_matrix[:, i]
+        ax3.set_title("Daily action composition (%)")
+        ax3.set_ylabel("% of events")
+        ax3.set_ylim(0, 100)
+        ax3.legend()
+        ax3.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+        fig3.autofmt_xdate()
+        save_fig(fig3, out_dir, "action_composition_daily.png")
+
+        # Monthly summary table (30-day buckets)
+        monthly_df = daily_df.group_by(
+            ((pl.col("day") // (86400 * 30)) * 30 * 86400).alias("month"), "action"
+        ).agg(pl.col("n").sum())
+        monthly_pivot = (
+            monthly_df.pivot(
+                index="month", columns="action", values="n", aggregate_function="first"
+            )
+            .fill_null(0)
+            .sort("month")
+        )
+        for a in known_actions:
+            if a not in monthly_pivot.columns:
+                monthly_pivot = monthly_pivot.with_columns(
+                    pl.lit(0, dtype=pl.Int64).alias(a)
+                )
+
+        print(
+            f"  {'Month':<12} {'Total':>8} {'Open':>8} {'Close':>8} {'Deposit':>8} {'Withdraw':>8} {'Liquidate':>8}"
+        )
+        print("  " + "-" * 68)
+        for row in monthly_pivot.iter_rows():
+            month_ts = row[0]
+            month_label = _ts_to_date(month_ts)[:7]
+            vals = row[1:]
+            total = sum(vals)
+            print(
+                f"  {month_label:<12} {total:>8,} {vals[0]:>8,} {vals[1]:>8,} {vals[2]:>8,} {vals[3]:>8,} {vals[4]:>8,}"
+            )
         print()
         pbar.update()
 
@@ -162,7 +324,9 @@ async def main(args: argparse.Namespace, out_dir: Path) -> None:
         _print_box("UNIQUE COUNTS")
         print(f"  Unique wallets:     {n_wallets:>12,}")
         print(f"  Unique positionKeys: {n_positions:>11,}")
-        print(f"  Events/wallet avg:  {total / n_wallets:.1f}" if n_wallets else "  N/A")
+        print(
+            f"  Events/wallet avg:  {total / n_wallets:.1f}" if n_wallets else "  N/A"
+        )
         print()
         pbar.update()
 

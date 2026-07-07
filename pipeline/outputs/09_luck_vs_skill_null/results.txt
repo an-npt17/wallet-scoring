@@ -1,0 +1,27 @@
+╔════════════════════════════════════════════════════════════════╗
+║  LUCK-VS-SKILL VALIDITY CHECK                                  ║
+╚════════════════════════════════════════════════════════════════╝
+  Wallets tested:              1,231
+  Population base hit rate:    0.4435
+
+╔════════════════════════════════════════════════════════════════╗
+║  TEST 1: EXACT BINOMIAL (Kosowski et al. 2006)                 ║
+╚════════════════════════════════════════════════════════════════╝
+  Wallets with train-window record significant at p<0.05: 84 (6.82%)
+  Reference: Gomez-Cram et al. (2026) flag 3.14% of Polymarket accounts
+  as 'skilled winners' via an analogous persistence test.
+
+  Of the 123 bayes_score top-decile wallets, 72 (58.5%) are also binomial-significant.
+
+╔════════════════════════════════════════════════════════════════╗
+║  TEST 2: MONTE-CARLO RANDOM-ALLOCATION NULL (Papaioannou et al. 2024)║
+╚════════════════════════════════════════════════════════════════╝
+  Real top-decile mean FUTURE win rate (out-of-sample): 0.5010
+  Null (chance-trader) top-decile mean TRAIN win rate:
+    mean=0.7276  std=0.0108
+  Real out-of-sample value falls at the 0.0th percentile of the null.
+  -> Cannot reject the null that top-decile performance is explainable by chance.
+
+  NOTE: the null uses train-window base rate + trade counts to simulate chance
+  traders, then compares against real OUT-OF-SAMPLE future win rate — a stricter
+  test than comparing null to the (trivially correlated) train-window value.
