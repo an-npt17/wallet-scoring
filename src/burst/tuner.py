@@ -53,26 +53,19 @@ class BurstTunerService:
         y_val = val["label"].to_numpy().astype(np.int8)
 
         def objective(trial: optuna.Trial) -> float:
-            params = {
-                "learning_rate": trial.suggest_float(
-                    "learning_rate", 0.01, 0.15, log=True
-                ),
-                "num_leaves": trial.suggest_int("num_leaves", 15, 255),
-                "min_child_samples": trial.suggest_int("min_child_samples", 20, 300),
-                "subsample": trial.suggest_float("subsample", 0.6, 1.0),
-                "colsample_bytree": trial.suggest_float("colsample_bytree", 0.5, 1.0),
-                "reg_alpha": trial.suggest_float("reg_alpha", 1e-8, 10.0, log=True),
-                "reg_lambda": trial.suggest_float("reg_lambda", 1e-8, 10.0, log=True),
-                "scale_pos_weight": trial.suggest_float(
-                    "scale_pos_weight", 1.0, 200.0, log=True
-                ),
-            }
             model = lgb.LGBMClassifier(
                 n_estimators=cfg.max_estimators,
+                learning_rate=trial.suggest_float("learning_rate", 0.01, 0.15, log=True),
+                num_leaves=trial.suggest_int("num_leaves", 15, 255),
+                min_child_samples=trial.suggest_int("min_child_samples", 20, 300),
+                subsample=trial.suggest_float("subsample", 0.6, 1.0),
+                colsample_bytree=trial.suggest_float("colsample_bytree", 0.5, 1.0),
+                reg_alpha=trial.suggest_float("reg_alpha", 1e-8, 10.0, log=True),
+                reg_lambda=trial.suggest_float("reg_lambda", 1e-8, 10.0, log=True),
+                scale_pos_weight=trial.suggest_float("scale_pos_weight", 1.0, 200.0, log=True),
                 subsample_freq=1,
                 random_state=cfg.seed,
                 verbose=-1,
-                **params,
             )
             model.fit(
                 x_tr,

@@ -1,4 +1,5 @@
-"""Exponential-kernel Hawkes baselines for liquidation-burst prediction.
+"""
+Exponential-kernel Hawkes baselines for liquidation-burst prediction.
 
 Two published-method baselines, fit by maximum likelihood:
 
@@ -37,8 +38,11 @@ class AssetScores(BaseModel):
     train_events: int
 
 
-def _excitation(events: NDArray[np.float64], query: NDArray[np.float64], beta: float) -> NDArray[np.float64]:
-    """A(q) = sum_{e < q} exp(-beta * (q - e)) for each query time q.
+def _excitation(
+    events: NDArray[np.float64], query: NDArray[np.float64], beta: float
+) -> NDArray[np.float64]:
+    """
+    A(q) = sum_{e < q} exp(-beta * (q - e)) for each query time q.
 
     Events strictly before the query (no same-instant leakage). Both inputs are
     assumed sorted ascending; result is aligned to `query`.
@@ -79,7 +83,11 @@ class HawkesBaselineService:
         alpha_s = np.exp(theta[1])
         alpha_m = np.exp(theta[2]) if use_market else 0.0
         beta = np.exp(theta[3])
-        lam = mu + alpha_s * beta * a_self + (alpha_m * beta * a_mkt if use_market else 0.0)
+        lam = (
+            mu
+            + alpha_s * beta * a_self
+            + (alpha_m * beta * a_mkt if use_market else 0.0)
+        )
         lam = np.maximum(lam, 1e-12)
         ll = np.sum(np.log(lam))
         ll -= mu * span
@@ -104,22 +112,30 @@ class HawkesBaselineService:
             a_self = _excitation(self_events, self_events, beta0)
             a_mkt = (
                 _excitation(market_events, self_events, beta0)
-                if use_market else np.zeros_like(a_self)
+                if use_market
+                else np.zeros_like(a_self)
             )
             comp_self = 1.0 - np.exp(-beta0 * (t1 - self_events))
             comp_mkt = (
                 1.0 - np.exp(-beta0 * (t1 - market_events[market_events < t1]))
-                if use_market else np.zeros(0)
+                if use_market
+                else np.zeros(0)
             )
             span = t1 - t0
 
             def obj(theta: NDArray[np.float64]) -> float:
                 # Fix beta to beta0 (theta[3] ignored via override).
                 th = np.array([theta[0], theta[1], theta[2], np.log(beta0)])
-                return self._nll(th, a_self, a_mkt, comp_self, comp_mkt, span, use_market)
+                return self._nll(
+                    th, a_self, a_mkt, comp_self, comp_mkt, span, use_market
+                )
 
-            x0 = np.log(np.array([max(len(self_events) / max(span, 1.0), 1e-6), 0.3, 0.3]))
-            res = minimize(obj, x0, method="Nelder-Mead", options={"maxiter": 400, "xatol": 1e-3})
+            x0 = np.log(
+                np.array([max(len(self_events) / max(span, 1.0), 1e-6), 0.3, 0.3])
+            )
+            res = minimize(
+                obj, x0, method="Nelder-Mead", options={"maxiter": 400, "xatol": 1e-3}
+            )
             nll = float(res.fun)
             mu, alpha_s, alpha_m = np.exp(res.x[0]), np.exp(res.x[1]), np.exp(res.x[2])
             params = HawkesParams(
@@ -140,7 +156,8 @@ class HawkesBaselineService:
         cutoff_ts: int,
         use_market: bool,
     ) -> tuple[NDArray[np.float64], NDArray[np.int8]]:
-        """Fit on events before `cutoff_ts`, score panel test bins (bin_ts >= cutoff).
+        """
+        Fit on events before `cutoff_ts`, score panel test bins (bin_ts >= cutoff).
 
         Returns pooled (scores, labels) over all assets' test bins.
         """
@@ -157,26 +174,38 @@ class HawkesBaselineService:
 
         try:
             from tqdm import tqdm
+
             iterator = tqdm(assets, desc="Hawkes fit/score", unit="asset")
         except ImportError:
             iterator = assets
 
         for asset in iterator:
-            ev = np.sort(
-                liq.filter(pl.col("asset") == asset)["close_ts"].to_numpy().astype(np.float64)
-            ) / s
+            ev = (
+                np.sort(
+                    liq.filter(pl.col("asset") == asset)["close_ts"]
+                    .to_numpy()
+                    .astype(np.float64)
+                )
+                / s
+            )
             ev_train = ev[ev < cutoff_ts / s]
             if len(ev_train) < 20:
                 continue
             t0, t1 = float(ev_train[0]), float(cutoff_ts / s)
             params = self._fit_asset(ev_train, market_train, t0, t1, use_market)
 
-            test = panel.filter((pl.col("asset") == asset) & (pl.col("bin_ts") >= cutoff_ts))
+            test = panel.filter(
+                (pl.col("asset") == asset) & (pl.col("bin_ts") >= cutoff_ts)
+            )
             if test.height == 0:
                 continue
             q = test["bin_ts"].to_numpy().astype(np.float64) / s
             a_self = _excitation(ev, q, params.beta)
-            a_mkt = _excitation(market_all, q, params.beta) if use_market else np.zeros_like(a_self)
+            a_mkt = (
+                _excitation(market_all, q, params.beta)
+                if use_market
+                else np.zeros_like(a_self)
+            )
             lam = (
                 params.mu
                 + params.alpha_self * params.beta * a_self
