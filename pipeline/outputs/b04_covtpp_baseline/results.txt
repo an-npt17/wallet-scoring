@@ -1,0 +1,18 @@
+  Panel rows: 4,239,195  test bins: 1,271,760
+  Cutoff ts: 1772560200  test positive rate: 0.0056
+
+╔══════════════════════════════════════════════════════════════════╗
+║  TRAINING COVARIATE-CONDITIONED NEURAL TPP (GRU hazard)          ║
+╚══════════════════════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════════════════╗
+║  OUT-OF-SAMPLE COMPARISON (same test bins, all stages)           ║
+╚══════════════════════════════════════════════════════════════════╝
+  model                                ROC-AUC    PR-AUC
+  CovTPP (GRU hazard, +covariates)      0.9792    0.2556
+  THP (neural TPP)                      0.9700    0.1294
+  Hawkes (univariate, MLE)              0.9746    0.1570
+  Hawkes (+market, MLE)                 0.9740    0.1568
+  LGBM baseline (past-intensity)        0.9078    0.2281
+  LGBM full (tuned, AP)                 0.9801    0.2502
+
+  (random PR-AUC = positive rate = 0.0056)
