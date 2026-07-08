@@ -9,6 +9,7 @@ dependencies = [
   "lightgbm>=4.6.0",
   "matplotlib==3.11.0",
   "numpy==2.5.0",
+  "optuna>=4.9.0",
   "polars[rt64]==1.42.1",
   "pydantic==2.13.4",
   "python-dotenv==1.2.2",

@@ -1,0 +1,29 @@
+╔══════════════════════════════════════════════════════════════════╗
+║  BUILDING LEAKAGE-SAFE BURST PANEL                               ║
+╚══════════════════════════════════════════════════════════════════╝
+  Loaded cached panel: data/processed/burst_panel.parquet
+  Panel rows (asset x active bin): 4,239,195
+  Assets: 40
+  Positive rate (burst): 0.0122
+  Label: h=15min, threshold>=3
+
+  Train rows: 2,967,435 (pos 0.0151)
+  Test  rows: 1,271,760 (pos 0.0056)
+
+╔══════════════════════════════════════════════════════════════════╗
+║  TUNING FULL MODEL (Optuna x40, objective=average_precision)     ║
+╚══════════════════════════════════════════════════════════════════╝
+  Best params: {'learning_rate': 0.010391373014280456, 'num_leaves': 84, 'min_child_samples': 159, 'subsample': 0.676921100756981, 'colsample_bytree': 0.6091330191487015, 'reg_alpha': 1.379067499000537e-06, 'reg_lambda': 3.1370340552022786e-05, 'scale_pos_weight': 3.9878046874251853, 'n_estimators': 54}
+╔══════════════════════════════════════════════════════════════════╗
+║  OUT-OF-SAMPLE RESULTS (later test period)                       ║
+╚══════════════════════════════════════════════════════════════════╝
+  model                        n_feat   ROC-AUC    PR-AUC
+  baseline (past-intensity)         2    0.9078    0.2281
+  full (default LGBM)              17    0.9790    0.2335
+  full (tuned, AP)                 17    0.9801    0.2502
+
+  LIFT full(default) over baseline:  ROC-AUC +0.0712   PR-AUC +0.0054
+  LIFT full(tuned)   over baseline:  ROC-AUC +0.0723   PR-AUC +0.0221
+  GAIN from tuning (tuned - default): PR-AUC +0.0167
+  (PR-AUC baseline = positive rate = 0.0056)
+

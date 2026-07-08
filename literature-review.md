@@ -1,191 +1,88 @@
-# Literature Review: Elite Wallet Scoring with Side-Aware Skill Decomposition
+# Literature Review: Tier-Aware Crowding and Early Warning of Synchronized Liquidation Bursts in On-Chain Perpetual Futures
 
-**Collection:** Research-WalletScoring-2026-07\
-**Date:** 2026-07-02\
-**Scope:** Focused (2023–2026, 22 papers)
+**Branch:** `liquidation-burst` · **Date:** July 2026 · **Author:** MSc Computer Science Thesis
 
-______________________________________________________________________
+> Scope note. This review was assembled via WebSearch (Zotero MCP was unavailable in
+> this session). arXiv IDs and venues are recorded in `references.bib`; entries added
+> in the last search pass (2025–2026 preprints) are flagged there as requiring
+> author/DOI verification before camera-ready.
 
-## 1. Introduction
+---
 
-Blockchain copy trading platforms promise retail participants access to "smart money" alpha by mirroring high-performing wallets. The commercial appeal is direct: identify elite wallets, rank them, and let followers copy. Yet this framing conceals a fundamental measurement problem. A single PnL score conflates four orthogonal sources of edge—entry timing, exit quality, position sizing discipline, and originality relative to the crowd—each of which may be present or absent independently. This review synthesizes 22 papers across on-chain wallet scoring, trader skill decomposition, Bayesian performance attribution, copy-trading dynamics, and informed-trading detection to identify the state of the art and its gaps.
+## 1. Motivation and Problem Setting
 
-______________________________________________________________________
+Perpetual futures ("perps") are the dominant crypto derivative, with daily volume regularly exceeding \$100B, and are increasingly the venue where *price discovery* happens (spot follows perps). Their defining risk is the **liquidation cascade**: once a cluster of leveraged positions breaches maintenance margin, forced liquidations sell into the market, push price further, and trip the next layer of leveraged positions — a self-exciting, contagious unwind. Practitioners already treat crowded positioning (extreme funding rates, long/short imbalance, record open interest) as informal early-warning signals, but these are heuristic thresholds ("funding > 15% APR"), not calibrated predictive models.
 
-## 2. On-Chain Wallet Scoring and DeFi Reputation
+This thesis proposes to (a) engineer **tier-aware crowding and co-positioning-graph features** from on-chain perp event streams, (b) forecast **synchronized liquidation bursts** with a **marked/multivariate self-exciting point process** whose intensity is modulated by those features, and (c) deliver **calibrated, drift-aware early warnings** using adaptive conformal prediction. The available database (`perpetuals_knowledge_graph`) records 1.34M closed positions across 249 assets and 5 venues over 491 days, with 190,583 explicit `Liquidate` events — a dense, self-supervised label source, in contrast to the noise-dominated win-rate labels that limited the prior wallet-scoring effort.
 
-### 2.1 Composite Behavioral Scores
+Five literature pillars support the design.
 
-The most direct antecedent is the zScore framework of Anon et al. (2025) [2507.20494], which applies a deep residual neural network on Uniswap v3 data to produce two scores: a **Liquidity Provision Score** capturing strategic pool contributions, and a **Swap Behavior Score** reflecting trading intent, volatility exposure, and withdrawal discipline. Rule-based behavioral blueprints decompose activity into volume, frequency, holding time, and withdrawal patterns before feeding the supervised network. The framework demonstrates that wallet behavior is multi-dimensional; however, it (a) treats buying and selling as a single swap dimension, (b) produces point scores without uncertainty estimates, and (c) is tested on a single protocol.
+---
 
-An earlier credit-risk angle (Bao et al., 2026, Springer) uses a transaction-graph predictive hurdle model to decompose DeFi default risk into Probability of Default, Liquidation Severity, and Exposure at Default on Compound V2 data (AUC-ROC 0.866). This decomposes *risk* but not *skill*.
+## 2. Pillar 1 — Liquidation Cascades and Self-Exciting Dynamics
 
-Survey papers on ML for blockchain data analysis (Zheng et al., 2024 [2404.18251]) and fraud detection in DeFi (Zhu et al., 2023 [2308.15992]) establish the feature engineering landscape: transaction graph structure (GNN node embeddings), temporal patterns, and protocol-level metadata are the standard inputs for address classification. However, classification for fraud or risk is a different objective than scoring genuine trading skill.
+Self-exciting (Hawkes) processes are the canonical model for event contagion in finance: the arrival of one event transiently raises the intensity of further events via an (often exponential) triggering kernel [Bacry et al., 2015]. Reflexivity — the degree to which market activity is endogenously self-generated rather than driven by exogenous news — has been quantified through the branching ratio of Hawkes fits and proposed as a flash-crash precursor [Filimonov & Sornette, 2012].
 
-### 2.2 On-Chain Flow Signals
+Directly adjacent, **Cao & Palaash (2025)** fit a **3-variate Hawkes process to cross-protocol DeFi liquidation clustering** (Aave V3, Compound V3, Morpho), estimating exponential triggering kernels via MLE on ~7,500 on-chain liquidation events (2023–2025). This is the closest prior work and the primary methodological baseline to beat. **Crucially, it differs from this thesis on three axes**: (i) it models *DeFi lending* liquidations (collateral health-factor breaches), not *perpetual-futures* margin liquidations; (ii) events are aggregated at the *protocol* level, with no wallet-tier structure or positioning covariates; and (iii) it is a *descriptive* clustering model, not a *calibrated predictive* early-warning system evaluated by lead time / false alarms. A modulated-renewal Hawkes variant has also been applied to extreme mid-price drops on cryptocurrencies [UNSW thesis], and Markov-modulated Hawkes to high-frequency manipulation detection [arXiv:2502.04027], confirming that regime-switching intensities matter in this domain.
 
-He et al. (2024) [2411.06327] examine the intraday return- and volatility-forecasting power of on-chain flows for BTC, ETH, and USDT. USDT outflows to exchanges positively predict BTC and ETH returns; ETH net inflows predict ETH returns negatively; BTC inflows predict lower volatility. These flow signals demonstrate that on-chain activity contains information about future price, which is the prerequisite for skill identification. However, the study measures asset-level signals, not wallet-level skill.
+**Takeaway.** The Hawkes family is the correct mechanistic prior, and a strong published baseline exists — but no one has fit a *perp*, *tier-marked*, *covariate-modulated* liquidation point process.
 
-### 2.3 Perpetual DEX Market Structure
+---
 
-The perpetual futures DEX ecosystem that constitutes our data source has attracted a growing body of market-microstructure research. Chen et al. (2024) [2402.03953] classify perpetual exchange architectures into three models—vAMM, Oracle-based, and Central Limit Order Book (CLOB)—and document that each produces distinct behavioral signatures: under oracle-based pricing, traders act as price takers reacting to external price moves, while vAMM environments exhibit asymmetric long/short open-interest dynamics. Crucially, Chen et al. observe that **less informed traders overreact to positive news by increasing long exposure**, a systematic bias directly relevant to our Long-skill decomposition.
+## 3. Pillar 2 — Perp Microstructure, Crowding, and Funding as Early-Warning Signals
 
-Barone and Lillo (2026) [2606.15715] study adverse selection and market impact on Hyperliquid—one of the primary platforms in our dataset. Using 4.3 million reconstructed metaorders, they demonstrate that visible TWAP orders attract liquidity and face lower permanent price impact than hidden orders. This establishes a microstructure baseline for Hyperliquid: trader order-flow visibility correlates with execution quality, implying that wallet-level informed-trading signals are embedded in the on-chain event stream we analyze. The **adverse selection burden** quantified by Barone and Lillo is the market-level manifestation of the informed trading we seek to measure at the wallet level.
+Microstructure work frames the cascade mechanism precisely: crowding thins the market's "error bars," so a modest (1–5%) adverse move breaches maintenance margins, and forced market orders deepen the move and trigger the next layer [perp-microstructure practitioner literature, 2026]. Funding rates and open interest are the standard crowding proxies; Granger-causality studies report that *extreme* funding has predictive value for subsequent moves, and the recent **Slippage-at-Risk (SaR)** framework [arXiv:2603.09164] builds a *forward-looking* liquidity-risk measure for perp exchanges.
 
-Chitra (2026) [2512.01112] provides the first formal analysis of Hyperliquid's autodeleveraging (ADL) mechanism, documenting a $2.1B position closeout in 12 minutes on October 10, 2025. The paper identifies a trilemma: no ADL policy can simultaneously guarantee exchange solvency, revenue, and trader fairness. For wallet scoring, the ADL event creates a natural external shock that tests whether high-ranked wallets are genuinely skilled (can anticipate and hedge ADL risk) or merely lucky (high leverage that survives until a systemic event). **Liquidation rate under ADL stress is a proposed risk-intelligence dimension** in our framework.
+**Gap for this thesis.** These signals are venue-level, funding-rate-dependent, and heuristic. The `perpetuals_knowledge_graph` schema exposes something richer and finer: per-event `size_usd`, `side`, `leverage`, `owner_account`, and timestamp in `logs`, plus a market-wide `aggregated_assets` snapshot that already defines **small/medium/large wallet tiers** with long/short size and count percentages. This permits *tier-resolved* crowding features (small-vs-large disagreement, tier imbalance, positioning concentration, consensus velocity) that funding rate alone cannot express. Note two schema constraints, addressed in the proposal: (i) `aggregated_assets` is a *snapshot* (no timestamp), so the crowding *time series* must be reconstructed from `logs`; (ii) **no funding-rate field exists**, so funding enters only as a known *event-time clock* (hourly / 8-hourly windows), not an observed covariate.
 
-______________________________________________________________________
+---
 
-## 3. Informed Trading Detection in Decentralized Markets
+## 4. Pillar 3 — Marked and Neural Point Processes
 
-### 3.1 Prediction Market Evidence
+Beyond parametric Hawkes, neural point processes learn flexible conditional-intensity functions with RNNs, transformers, and state-space models [neural STPP, Zhou et al., 2022; Transformer/Mamba Hawkes, arXiv:2407.05302], and recent work targets *multi-event* forecasting on spatiotemporal point processes [Beyond Hawkes, arXiv:2211.02922]. Marks (event covariates such as wallet tier, asset, venue) let a single process model heterogeneous events and cross-type excitation.
 
-The emergence of decentralized prediction markets (Polymarket) has produced the richest evidence on identifying skilled/informed traders at the wallet level. Three concurrent 2026 methodological papers represent the frontier:
+**Relevance.** The proposed model treats each liquidation as a *marked* event (mark = wallet tier × asset × venue), enabling cross-tier and cross-venue excitation — e.g. large-wallet liquidations exciting small-wallet liquidations, or Hyperliquid unwinds exciting Jupiter unwinds. Parametric marked Hawkes is the primary model; a neural-intensity variant is a stretch extension, benchmarked against it rather than assumed superior.
 
-**Gomez-Cram, Mitts, and Nechepurenko** are synthesized by Nechepurenko (2026) [2605.02287], who proposes a methodological taxonomy:
+---
 
-- **Composite screening** (Mitts & Ofir): Identified $143M in anomalous profit across 210,000+ wallet-market pairs.
-- **Sign-randomization testing** (Gomez-Cram et al.): Event-level analysis classifying 3.14% of accounts as "skilled winners" via persistent directional accuracy.
-- **Information Leakage Score (ILS)**: Per-market quantification of information front-loading at public-event timestamps.
+## 5. Pillar 4 — Topology of On-Chain Transaction / Positioning Graphs
 
-Saguillo et al. (2026) [2605.02286] apply ILS to documented insider cases (US-Iran conflict markets), finding a 0.444 magnitude shift between event-based and resolution-proxy measurements, with 332 wallets active across correlated markets. The anatomy of Polymarket in the 2024 US election (2603.03136) quantified $3.6B in trading volume and demonstrated persistent order flow from a small subset of wallets.
+Topological Data Analysis (TDA) on dynamic blockchain networks captures structural change (connected components, loops, higher-order voids) that precedes price anomalies. Persistent-homology methods detect anomalies in dynamic multilayer blockchain networks [Ofori-Boateng et al., 2021], predict extreme **XRP price surges from topological features** [arXiv:2603.18021], and a **hierarchical persistence-velocity** method targets crypto-market network anomalies [arXiv:2512.14615].
 
-The ForesightFlow framework (2026) [2605.00493] generalizes ILS into a systematic scoring system for any prediction market, quantifying per-market information advantage.
+**Caveat honestly stated.** These works use *native transaction graphs* (address-to-address transfers). This database has **no counterparty edges** — perp positions are wallet-vs-protocol. Therefore this thesis constructs a **co-positioning graph** (wallets sharing asset + side + time window form edges) and extracts centrality / persistence features of the *crowd's* structure. This is a weaker topological object than a transfer graph, so graph features are proposed as an *ablation-tested add-on*, not the core claim — the review is explicit that the TDA-on-transaction-graph novelty does not transfer wholesale.
 
-**Key insight for wallet scoring:** These methods show wallet-level skill can be identified on prediction markets through persistence testing and front-loading analysis. The fundamental methods (sign-randomization, Bayesian persistence) are transferable to DeFi trading with appropriate adaptations.
+---
 
-______________________________________________________________________
+## 6. Pillar 5 — Calibrated Prediction Under Distribution Shift
 
-## 4. Trader Skill Decomposition in Traditional Finance
+Real-time early warning must stay calibrated as regimes change. **Adaptive Conformal Inference** [Gibbs & Candès, 2021] updates the miscoverage level online — widening intervals after a miss, narrowing after a hit — to control long-run coverage under distribution shift without modeling the shift. **Adaptive Conformal Predictions for Time Series** [Zaffran et al., 2022] extends this to dependent series, and drift-aware / spectral variants handle non-exchangeable streaming data [arXiv:2606.15953]. Conformal anomaly detection with time-series foundation models has also emerged [arXiv:2604.20122].
 
-### 4.1 Buy/Sell Asymmetry
+**Relevance.** A liquidation-burst warning is only actionable if its probability is *calibrated* and stays calibrated across bull/bear/chop regimes. Wrapping the point-process (or classifier) output in adaptive conformal gives calibrated alarm intervals and a principled lead-time / false-alarm tradeoff — a contribution orthogonal to, and stackable on, the intensity model.
 
-The most directly relevant empirical result is Lim et al. (2022) \[doi:10.1007/s11156-022-01065-9\]: **selling skill drives overall mutual fund performance, while buying skill is largely uncorrelated with aggregate alpha.** Fund managers with superior selling ability are significantly better at selecting stocks to buy as well, but the converse does not hold. This asymmetry arises because most academic and practitioner attention focuses on entry signals while exit decisions receive less systematic analysis.
+---
 
-This finding directly supports the research hypothesis: a single composite score that averages buy and sell behavior obscures the most economically meaningful dimension (sell skill). Platform ROI rankings that reward total PnL will promote wallets with strong buy skill even if those wallets give back all gains through poor exits.
+## 7. Synthesis and Identified Gaps
 
-### 4.2 Timing vs. Sizing Decomposition
+| # | Gap | Evidence it is open |
+|---|-----|---------------------|
+| **G1** | No **tier-structured, covariate-modulated** liquidation point process for **perps** | Cao & Palaash (2025) is protocol-level DeFi-lending, descriptive, no tiers/covariates |
+| **G2** | Crowding early-warning is **heuristic** (funding/OI thresholds), not a **calibrated predictive model** | Funding-rate signals are Granger-causal heuristics; SaR is liquidity-risk, not burst prediction |
+| **G3** | **Cross-tier / cross-venue excitation** of liquidation bursts is unstudied | Hawkes-finance work is single-asset or single-protocol |
+| **G4** | No **calibrated, drift-aware** early-warning with lead-time / false-alarm benchmarks in this domain | ACI/time-series conformal exist but are unapplied to on-chain liquidation bursts |
+| **G5** | Positioning-**graph topology** as intensity covariate is unexplored (with honest limits) | TDA-on-blockchain uses transfer graphs; co-positioning graph is novel but weaker |
 
-Van Loon (2018) [doi:10.3905/jpm.2018.44.3.025] formalizes the decomposition of the Information Ratio (IR) into:
+**Positioning.** The thesis's defensible core is **G1 + G2 + G4**: a perp, tier-marked, crowding-modulated self-exciting model delivering *calibrated* liquidation-burst early warnings, benchmarked against (i) the practitioner funding/imbalance heuristic, (ii) standard learners (logistic, gradient boosting), and (iii) the published multivariate-Hawkes baseline adapted to perps. G3 and G5 are higher-risk extensions carried as ablations.
 
-$$\\text{IR} = \\text{Hit Ratio (timing)} \\times \\text{Win/Loss Ratio (sizing)} \\times \\sqrt{\\text{Breadth}}$$
+**Why this fits the data (and avoids the prior project's failure).** The prior wallet-scoring work collapsed because its evaluation label (future win rate) was ~99% sampling noise. The label here — a synchronized liquidation/close burst in the next 5/15/60 minutes — is an **event count**, dense (190k liquidations) and self-supervised, so measurable model improvement is achievable and reviewer-defensible.
 
-The hit ratio measures the proportion of directionally correct decisions (timing skill); the win/loss ratio measures whether position sizes are larger when correct (sizing skill). Van Loon demonstrates empirically that **timing skill is approximately twice as important as sizing skill** in generating positive risk-adjusted returns. Critically, positive IRs are achievable even with majority-wrong decisions if position sizing is disciplined enough.
+---
 
-Applied to DeFi wallets: a wallet with 40% hit rate but 3:1 win/loss ratio outperforms a wallet with 60% hit rate and 1.2:1 win/loss ratio, yet naive PnL-based ranking would conflate them.
+## 8. Key References (full entries in `references.bib`)
 
-### 4.3 Skill Persistence and Bayesian Attribution
-
-Berk and van Binsbergen (2015) [doi:10.1016/j.jfineco.2015.05.002] measure mutual fund skill using AUM-adjusted alpha (value added in dollars) rather than return-based alpha. Skilled managers attract capital, which erodes per-unit returns—the standard performance metric therefore underestimates aggregate skill. The paper uses a Bayesian hierarchical framework with informative priors derived from cross-sectional distribution of managers.
-
-Kosowski et al. (2006) [doi:10.1016/j.jfineco.2005.12.009] apply a Bayesian and bootstrap approach to hedge fund performance. Bootstrap simulations of 10,000 runs under the null hypothesis of zero skill establish a benchmark distribution; top-performing funds are evaluated against this null. **The top decile of hedge funds demonstrates alpha that cannot be attributed to sampling variation.** This provides the methodological template for distinguishing lucky from skilled wallets.
-
-Fama and French (2010) [doi:10.1111/j.1540-6261.2010.01598.x] apply the bootstrap to mutual funds and find the opposite: *most* active managers lack genuine skill after adjusting for multiple comparisons. Combined with Kosowski et al., the picture is that a small tail of managers are genuinely skilled while the bulk are not—exactly the structure expected in crypto wallet populations.
-
-______________________________________________________________________
-
-## 5. Copy Trading Dynamics and Crowd Effects
-
-### 5.1 Social Trading Networks
-
-Liu, Yang, and Tan (2023) [doi:10.2139/ssrn.4528456] study the coevolution of trader networks on eToro, finding that **platform ranking and UI strongly influence follower-leader link formation**, with financial performance and social communication jointly determining network dynamics. Followers tend to connect with traders that are prominently displayed, not necessarily the most skilled. This has direct implications for wallet scoring systems: if a platform promotes wallets based on PnL rankings, followers will concentrate on those wallets regardless of whether the skill is persistent.
-
-### 5.2 Meme Coin Copy Trading and Manipulation
-
-The adversarial dimension is addressed by Gao et al. (2026) [2601.08641], who build a multi-agent LLM system to detect manipulative bots in meme coin copy-trading environments. Manipulative bots exploit copy-trading by front-running followers' replication of leader trades. The system achieves 3% average copier return under adversarial conditions through chain-of-thought reasoning that detects position concealment and sentiment fabrication. This paper establishes that **wallet scoring systems must be robust to strategic manipulation** by wallets gaming the scoring metric.
-
-Perseus (Xu et al., 2025) [2503.01686] identifies masterminds behind pump-and-dump schemes by tracking coordinated wallet clusters. Wallets can achieve high PnL rankings by coordinating P&D schemes—another attack vector against naïve scoring.
-
-______________________________________________________________________
-
-## 6. Luck vs. Skill in Heavy-Tailed Environments
-
-The M6 Investment Challenge analysis (Papaioannou et al., 2024) [2412.04490] demonstrates that **extreme Sharpe ratios in investment competitions are largely explainable by chance** when accounting for the number of participants. Strategic adversarial positioning—adjusting weights to beat competitors' portfolios—further decouples rankings from genuine skill. This finding is especially concerning for crypto wallet scoring: with millions of active wallets on Solana and Ethereum, some wallets will exhibit extraordinary past returns purely by chance.
-
-The VC analogy (Choi et al., 2025) [2605.03980] reinforces this: when outcomes are dominated by rare extreme events, VC portfolio distributions are "remarkably close to their random benchmarks," with the right tail statistically indistinguishable from random allocation. Crypto token markets exhibit similar fat-tailed return distributions, making luck-skill separation critical.
-
-______________________________________________________________________
-
-## 7. Gap Analysis
-
-### Gap 1: No Side-Aware Skill Decomposition for Crypto Wallets
-
-The finance literature conclusively demonstrates that buy and sell skill are orthogonal dimensions (Lim et al., 2022) and timing/sizing are separately quantifiable (Van Loon, 2018). Yet all existing crypto wallet scoring—zScore, Nansen Smart Money, DeBankPro—uses a single composite PnL or return metric. **No published work decomposes crypto wallet skill into buy skill, sell skill, timing skill, sizing skill, or regime-specific skill.** A wallet could rank highly by making one spectacular buy during a bull market while systematically leaving gains on the table through poor exits—and existing scoring systems would reward this wallet equally to one with balanced, persistent multi-dimensional skill.
-
-### Gap 2: No Bayesian Posterior Skill Scores with Confidence Intervals
-
-Kosowski et al. (2006) and Berk and van Binsbergen (2015) establish that point performance estimates are unreliable due to sampling variability, especially with short track records. Bootstrap simulations or Bayesian hierarchical models are necessary to distinguish lucky from skilled performers. Every existing crypto wallet scoring system produces a point estimate. **No system produces a posterior skill distribution or confidence interval for any skill dimension.** Without uncertainty quantification, a wallet with 20 trades and 80% win rate scores identically to one with 200 trades and 80% win rate—despite vastly different statistical reliability.
-
-### Gap 3: No Crowd-Adjusted Skill Correction
-
-Social trading literature (Liu et al., 2023) shows that when many followers copy a leader, the leader's edge degrades—subsequent followers face slippage, front-running by bots (Gao et al., 2026), and price impact from the crowd's collective action. A wallet's historical skill score may reflect edge that has already been arbitraged away by the time a new follower copies it. **No existing wallet scoring system discounts skill estimates based on crowding or copy-follower count.** Expected future value if copied with delay requires not just a skill estimate but a crowd-adjusted decay function.
-
-### Gap 4: No Leverage-Normalized Skill Score for Perpetual Traders
-
-Perpetual DEX research (Chen et al., 2024; Chitra, 2026) documents that traders use leverage ranging from 1x to 100x+ on platforms such as Hyperliquid and Jupiter. All existing wallet scoring systems—including the composite formula deployed in our source dataset (`risk_reward * 0.25 + win_loss_holding_time * 0.25 + win_loss_roi * 0.25 + win_pct * 0.25`)—treat ROI as a raw ratio without leverage normalization. A wallet generating 50% ROI at 50x leverage has the same notional risk exposure as one generating 1% ROI at 1x leverage, yet earns a higher composite score. **No published work adjusts perpetual wallet performance scores for leverage consumed, despite leverage being the primary risk dimension in perpetuals markets.**
-
-______________________________________________________________________
-
-## 7b. Reproducibility Audit — New Baselines Identified
-
-A follow-up search (2026-07) targeted specifically for methods reproducible on *our* data (perp position event logs — no follower graph, no order-book visibility, no text/sentiment) surfaced two additional candidates not previously in this review:
-
-**B7 — Sign-randomization skill classifier (Gomez-Cram et al., 2026, synthesized in Nechepurenko 2026 [2605.02287]).** Classifies wallets as "skilled winners" via permutation-test persistence of directional accuracy (3.14% of Polymarket accounts flagged). Confirmed via direct search: **the original account-level classifications, the 1,950-account insider list, and the sign-randomization source code have not been released.** This means reproducing it requires implementing the method from the paper's description rather than forking code — but it is fully reproducible on our data, since it only needs a wallet's sequence of directionally-correct/incorrect trades (which our `positions.parquet` already has via the `win` column). No new data needed.
-
-**B8 — Wash-trade / bot detection heuristic (Ashfaq 2023 [2305.01543]).** Graph-based heuristic flagging repeated buy-sell cycles between colluding wallets in NFT markets (0.14% of transactions flagged as wash-traded in the original study). **A public unofficial reference implementation exists** (github.com/Dreamerryao/nft-wash-trading). The core heuristic — rapid same-wallet open-close cycles, same-asset same-timestamp counterparties — maps directly onto our `positionKey`/Open-Close event structure. Directly relevant to Gao et al. (2026)'s manipulation-robustness concern (§5.2) and to the data-quality flags already surfaced in `docs/eda-report.tex` (0.2% of positions have <1h duration). Proposed use: a pre-filter that flags likely bot/wash-trade wallets *before* they are scored, rather than a ranking baseline to beat.
-
-**Supporting public dataset:** Polymarket-v1 (Time Seventeen, 2026 [2606.04217]) — 1.2B trade records, CC-BY-4.0, on Hugging Face, 100% ground-truth aggressor direction. Since Gomez-Cram et al.'s own code/labels are unreleased, this dataset lets us independently validate our reproduction of B7's sign-randomization test on prediction-market data (a second domain) before trusting the same implementation on our perp data — a cross-domain sanity check, not required but cheap given the data is already public and downloadable.
-
-**Not reproducible, still blocked** (unchanged from §7): Barone & Lillo's adverse-selection metric (needs order-visibility flags, absent from our event log), Liu et al.'s social-trading network effects (needs follower graph), Gao et al.'s LLM bot detector (needs text/sentiment).
-
-______________________________________________________________________
-
-## 8. Conclusion
-
-The literature converges on four conclusions relevant to elite wallet scoring:
-
-1. **Skill is multi-dimensional**: Buy/sell asymmetry (Lim et al., 2022) and timing/sizing orthogonality (Van Loon, 2018) are robust findings in traditional finance with direct applicability to on-chain perpetuals trading.
-
-1. **Skill needs uncertainty quantification**: In heavy-tailed environments, most apparent skill is luck (Fama-French 2010; Papaioannou 2024; Choi 2025). Bayesian or bootstrap methods (Kosowski 2006; Berk-van Binsbergen 2015) are necessary for reliable identification of genuinely skilled wallets.
-
-1. **Copied skill decays**: Platform dynamics (Liu et al., 2023) and adversarial bots (Gao et al., 2026) erode the value of publicly ranked wallets. A crowd-aware scoring function is a prerequisite for actionable copy-trading recommendations.
-
-1. **Perpetual DEX microstructure introduces leverage-specific risks**: Adverse selection (Barone & Lillo, 2026), ADL shocks (Chitra, 2026), and exchange-design behavioral biases (Chen et al., 2024) are unique to perp markets and absent from existing wallet scoring literature—which focuses on spot DEX or CEX data.
-
-No existing on-chain wallet scoring system addresses all four. This constitutes a clear research gap with direct commercial value: a side-aware, leverage-adjusted, Bayesian wallet skill score for perpetual DEX traders would be the first of its kind in the academic literature.
-
-______________________________________________________________________
-
-## References
-
-See `references.bib` for full BibTeX entries.
-
-| Key | Paper |
-|-----|-------|
-| [zScore2025] | Anon et al. (2025). Deep Reputation Scoring in DeFi. arXiv:2507.20494 |
-| [OnChainFlows2024] | He et al. (2024). Return and Volatility Forecasting Using On-Chain Flows. arXiv:2411.06327 |
-| [ILS2026] | Nechepurenko (2026). Per-Market Information Leakage and Order-Flow Skill. arXiv:2605.02287 |
-| [ILSdl2026] | Saguillo et al. (2026). Empirical Evaluation of Deadline-Resolved ILS. arXiv:2605.02286 |
-| [Polymarket2026] | Foley et al. (2026). Anatomy of a Blockchain Prediction Market. arXiv:2603.03136 |
-| [ForesightFlow2026] | Xu et al. (2026). ForesightFlow. arXiv:2605.00493 |
-| [TimingSizing2018] | Van Loon (2018). Timing versus Sizing Skill. JPM. doi:10.3905/jpm.2018.44.3.025 |
-| [SellSkill2022] | Lim et al. (2022). Fund manager skill: selling matters more! Rev. Quant. Finance Acc. doi:10.1007/s11156-022-01065-9 |
-| [BerkBinsbergen2015] | Berk & van Binsbergen (2015). Measuring skill in the mutual fund industry. JFE. doi:10.1016/j.jfineco.2015.05.002 |
-| [Kosowski2006] | Kosowski et al. (2006). Do hedge funds deliver alpha? JFE. doi:10.1016/j.jfineco.2005.12.009 |
-| [FamaFrench2010] | Fama & French (2010). Luck versus Skill. JF. doi:10.1111/j.1540-6261.2010.01598.x |
-| [M6Challenge2024] | Papaioannou et al. (2024). M6 Investment Challenge. arXiv:2412.04490 |
-| [VCRandom2025] | Choi et al. (2025). Do Venture Capitalists Beat Random Allocation? arXiv:2605.03980 |
-| [SocialTrading2023] | Liu, Yang & Tan (2023). Coevolution of Trader Networks. SSRN:4528456 |
-| [MemeCoinCopy2026] | Gao et al. (2026). Resisting Manipulative Bots in Meme Coin Copy Trading. arXiv:2601.08641 |
-| [Perseus2025] | Xu et al. (2025). Perseus: Tracing Pump-and-Dump Masterminds. arXiv:2503.01686 |
-| [DeFiFraud2023] | Zhu et al. (2023). AI-powered Fraud Detection in DeFi. arXiv:2308.15992 |
-| [MLBlockchain2024] | Zheng et al. (2024). ML for Blockchain Data Analysis. arXiv:2404.18251 |
-| [IndividualInvestors2013] | Barber & Odean (2013). The Behavior of Individual Investors. doi:10.1016/b978-0-44-459406-8.00022-6 |
-| [HedgeFundAlpha2006] | Kosowski, Naik & Teo (2006). Do Hedge Funds Deliver Alpha? doi:10.1016/j.jfineco.2005.12.009 |
-| [AdaptiveTrend2025] | Zhang et al. (2025). Systematic Trend-Following. arXiv:2602.11708 |
-| [DeFiEvent2025] | Li et al. (2025). Event-Aware Forecasting in DeFi. arXiv:2604.20374 |
-| [PerpDEXBehavior2024] | Chen, Ma & Nie (2024). How DEX Designs Shape Traders' Behavior on Perpetual Futures. arXiv:2402.03953 |
-| [HyperliquidAdverse2026] | Barone & Lillo (2026). Trading in the Sunshine or in the Shade: Market Impact and Adverse Selection on Hyperliquid. arXiv:2606.15715 |
-| [AutodeleveragingADL2026] | Chitra (2026). Autodeleveraging: Impossibilities and Optimization. arXiv:2512.01112 |
-| [PolymarketV1_2026] | Time Seventeen (2026). Polymarket-v1 Database. arXiv:2606.04217. Dataset: huggingface.co/datasets/TimeSeventeen/Polymarket-v1 |
-| [NFTWashDetect2023] | Ashfaq (2023). NFT Wash Trading Detection. arXiv:2305.01543. Code: github.com/Dreamerryao/nft-wash-trading |
+- Bacry, Mastromatteo, Muzy (2015) — *Hawkes processes in finance*.
+- Filimonov & Sornette (2012) — *Quantifying reflexivity … prediction of flash crashes*.
+- Cao & Palaash (2025) — *DeFi liquidations cluster across protocols: a multivariate Hawkes framework* (closest prior work / primary baseline).
+- Zhou et al. (2022) — *Neural point process for spatiotemporal event dynamics*; *Beyond Hawkes* (2022).
+- Ofori-Boateng et al. (2021) — *Topological anomaly detection in dynamic multilayer blockchain networks*; XRP topological anomaly prediction (2026).
+- Gibbs & Candès (2021) — *Adaptive conformal inference under distribution shift*; Zaffran et al. (2022) — *Adaptive conformal predictions for time series*.
+- Slippage-at-Risk (2026); Markov-modulated Hawkes manipulation detection (2025).

@@ -1,203 +1,137 @@
-# Research Proposal: Side-Aware Bayesian Wallet Skill Decomposition for DeFi Copy Trading
+# Research Proposal: Tier-Aware Crowding and Calibrated Early Warning of Synchronized Liquidation Bursts in On-Chain Perpetual Futures
 
-**Date:** 2026-07-02\
-**Program:** MSc Computer Science – Thesis\
-**Related collection:** Research-WalletScoring-2026-07 (Zotero)
+**Branch:** `liquidation-burst` · **Date:** July 2026 · **Target venues:** ICAIF 2027, KDD 2027 (Applied Data Science), or ACM AFT / ML-for-finance workshops.
 
 ______________________________________________________________________
 
-## 1. Problem Statement
+## 1. Overview (5W1H)
 
-Existing crypto wallet scoring systems rank wallets by a single composite score—typically realized PnL, win rate, or Sharpe ratio. This design conflates at least four orthogonal dimensions of trading edge that the traditional finance literature treats as distinct:
+> **M0 status (July 2026, locked).** Two feasibility probes were run before committing. (1) The liquidation-**magnet** hypothesis (price attracted to liquidation-price walls) was **rejected** on BTC/SOL/ETH, two test forms, all null (`m0-magnet-findings.md`) — **dropped as a claim**; the wall map is retained only as a candidate feature. (2) The liquidation-**burst label** **passed**: dense and strongly learnable (`m0-burst-findings.md`). **Locked primary label: h = 15 min, threshold ≥ 3 liquidations** (3.8% base rate, 52,182 positives). **Baseline to beat: past-intensity / univariate Hawkes**, which alone already reaches AUC ≈ 0.83–0.87 — so the contribution is *lift over the self-exciting baseline*, not mere burst predictability.
 
-1. **Buy skill**: ability to enter positions with positive expected return
-1. **Sell skill**: ability to exit positions to maximize realized gain (not just unrealized)
-1. **Timing skill**: hit ratio—fraction of directionally correct decisions
-1. **Sizing skill**: win/loss ratio—whether position sizes are larger on winning trades
-1. **Crowd-adjusted skill**: alpha above the synchronized behavior of followers and copiers
-
-The finance literature shows that buy and sell skill are orthogonal—selling skill is the primary driver of aggregate performance, not buying skill (Lim et al., 2022). Timing and sizing decompose the information ratio into two separately estimable components, with timing being approximately twice as informative (Van Loon, 2018). Meanwhile, in heavy-tailed environments like crypto, historical performance is largely indistinguishable from random luck without Bayesian uncertainty quantification (Kosowski et al., 2006; Choi et al., 2025).
-
-No published wallet scoring system for DeFi or CEX copy trading addresses any of these three issues. The result is that copy-trading platforms surface wallets by luck-contaminated PnL, assign equal confidence to a 5-trade wallet and a 500-trade wallet, and ignore the decay of edge as a wallet becomes widely copied.
-
-**This proposal defines a framework for side-aware, Bayesian, crowd-adjusted wallet skill decomposition.**
+- **What.** Forecast *synchronized liquidation bursts* — short windows in which many perpetual-futures positions on an asset are force-closed together — and issue *calibrated* early warnings with quantified lead time.
+- **Why.** Liquidation cascades are the primary systemic risk of leveraged crypto venues; existing signals (funding rate, open interest, long/short ratio) are heuristic thresholds, not calibrated predictive models. A calibrated warning is both a risk product and a scientific test of cascade contagion.
+- **Who.** Exchange risk desks, market makers, on-chain risk dashboards, and market-surveillance / systemic-risk researchers.
+- **When / Where.** On-chain perp data across 5 venues (Hyperliquid, Jupiter, GMX-v2, APX, Myx) and 5 chains, 491 days (2025-02-19 → 2026-06-26).
+- **How.** Tier-aware crowding + co-positioning-graph features → marked/multivariate self-exciting point process with covariate-modulated intensity → adaptive-conformal calibration → time-ordered, per-venue evaluation by lead time, PR-AUC, and calibration.
 
 ______________________________________________________________________
 
 ## 2. Research Questions
 
-**RQ1 (Decomposition):** Can buy-side skill and sell-side skill be separately identified for on-chain crypto wallets, and are they empirically orthogonal (low correlation)?
+**RQ1 (Features).** Do *tier-resolved* crowding features (small-vs-large disagreement, tier long/short imbalance, positioning concentration, consensus velocity) and co-positioning-graph features improve prediction of synchronized liquidation bursts over (a) the practitioner funding/imbalance heuristic and (b) standard learners on naive size/OI features?
 
-**RQ2 (Uncertainty):** Can a Bayesian hierarchical model produce reliable posterior skill distributions with calibrated credible intervals for each skill dimension, given the short trade histories typical of active DeFi wallets?
+**RQ2 (Contagion model).** Does a *marked, covariate-modulated* self-exciting point process with **cross-tier and cross-venue excitation** predict bursts better than (a) an independent-asset univariate Hawkes and (b) the published multivariate-Hawkes baseline [Cao & Palaash, 2025] adapted to perps?
 
-**RQ3 (Crowd adjustment):** Does a wallet's future copy-trader return diminish as its follower count grows, and can a crowd-decay function be estimated to produce a copy-adjusted expected value?
+**RQ3 (Calibration under shift).** Can adaptive conformal prediction maintain target coverage of the burst-probability early warning across market regimes, improving the lead-time / false-alarm tradeoff versus static calibration?
 
-**RQ4 (Validation):** Does a multi-dimensional skill score outperform single-score baselines in predicting future copy-trader returns, measured at 7-day, 30-day, and 90-day horizons on Solana and EVM chains?
-
-______________________________________________________________________
-
-## 3. Proposed Framework
-
-### 3.1 Skill Dimensions
-
-For each wallet *w* with trade history up to time *t*, define:
-
-**Buy skill** $s^{\\text{buy}}\_w$: risk-adjusted excess return on entry decisions.\
-Operationalization: for each buy transaction, compute forward return over a standardized holding window (24h, 7d, 30d). Benchmark: average token return over the same window. Buy alpha = mean(wallet forward return) − mean(token forward return), risk-adjusted by volatility.
-
-**Sell skill** $s^{\\text{sell}}\_w$: risk-adjusted alpha on exit decisions vs. two benchmarks:\
-(a) immediate exit at time of buy (opportunity cost benchmark)\
-(b) mean exit timing across all wallets for the same token\
-Operationalization: for each sell, compute realized return vs. (a) and (b). Sell alpha = mean(realized − benchmark).
-
-**Timing skill** $\\tau_w$: hit ratio of directionally correct entry decisions.\
-Operationalization: $\\tau_w = \\frac{1}{N} \\sum\_{i=1}^{N} \\mathbf{1}\[\\text{price}_{t_i+H} > \\text{price}_{t_i}\]$ where $H$ is a fixed horizon.
-
-**Sizing skill** $\\sigma_w$: win/loss ratio conditioned on position size.\
-Operationalization: split trades into above/below median size for that wallet; compute separate alpha for each group; sizing skill = (large-position alpha) − (small-position alpha).
-
-**Crowd-adjusted skill** $\\kappa_w$: alpha net of the synchronized crowd.\
-Operationalization: identify follower-set $F_w$ of wallets that copy *w* within $\\Delta t$ blocks. Crowd-return = mean return of copycat trades. Crowd-adjusted alpha = $s^{\\text{buy}}_w - \\text{return}_{\\text{crowd}}$.
-
-### 3.2 Bayesian Hierarchical Model
-
-Each skill dimension is modeled as a latent variable with a hierarchical prior:
-
-$$\\theta^{(d)}\_w \\sim \\mathcal{N}(\\mu^{(d)}, \\tau^{(d)2})$$
-$$\\hat{s}^{(d)}\_w | \\theta^{(d)}\_w, \\sigma^{(d)}\_w \\sim \\mathcal{N}(\\theta^{(d)}\_w, \\sigma^{(d)2}\_w / N_w)$$
-
-where $d \\in {\\text{buy, sell, timing, sizing, crowd}}$, $\\mu^{(d)}$ and $\\tau^{(d)}$ are population-level hyperparameters estimated from data, and $\\sigma^{(d)}\_w$ is the within-wallet noise. The posterior $p(\\theta^{(d)}\_w | \\hat{s}^{(d)}\_w, N_w)$ produces shrinkage toward the population mean—wallets with few trades shrink strongly, wallets with many trades retain their empirical estimate.
-
-**Posterior credible interval** for each dimension: 95% HPDI from MCMC sampling (PyMC or NumPyro).
-
-**Score for copy-trading decision:** Expected return at delay $\\Delta t$ with followers $|F_w|$:
-
-$$\\text{EV}^{\\text{copy}}\_w = \\mathbb{E}[\\theta^{\\text{sell}}\_w] \\cdot f(|F_w|, \\Delta t)$$
-
-where $f$ is a learned crowd-decay function (log-logistic or exponential).
-
-### 3.3 Regime Decomposition (Optional Extension)
-
-Condition skill estimates on market regime (bull/bear, high/low volatility, pre/post major catalyst) using a Hidden Markov Model on chain-level indicators. Per-regime skill scores reveal whether a wallet's edge is robust or regime-specific.
+Each RQ is falsifiable and measured against explicit baselines (§6–7).
 
 ______________________________________________________________________
 
-## 4. Data
+## 3. Data and Label Construction (grounded in verified schema)
 
-**Scope:** Perpetual futures positions (not spot DEX swaps) across four platforms and three chains.
+**Source collections** (`database/mongo/schema.py`): `logs` (40.5M Open/Close events with `size_usd`, `side`, `leverage`, `owner_account`, `asset`, `platform`, `timestamp`), `closed_positions` (1.34M, `realizedPnl`, `lastClosedAt`), `opening_positions` (live open state, `unrealizedPnl`), `aggregated_assets` (market-wide small/medium/large tier long/short size & count snapshot), `market_stats` (`whaleBehavior`, whale dominance, risk-appetite flow). Verified facts: **190,583 explicit `Liquidate` close events**, 533,274 positions with ≥1 liquidation, 249 assets, 5 platforms.
 
-| Dimension | Details |
-|-----------|---------|
-| **Platforms** | Jupiter (Solana), Hyperliquid, GMX-v2 (Arbitrum), Myx Finance (EVM), APX Finance |
-| **Chains** | Solana, Hyperliquid L1, Arbitrum, BSC, Ethereum |
-| **Period** | Jan 2024 – Jul 2026 (estimated from data; verify with `scripts/01_accounts_overview.py`) |
-| **Data source** | Private `perpetuals_knowledge_graph` MongoDB (env: `MONGO_SOURCE_URL`) |
-| **Raw event log** | `logs` collection — ~40M Open/Close/Deposit/Withdraw events |
-| **Closed positions** | `closed_positions` collection — realized PnL per completed position |
-| **Aggregated accounts** | `accounts` collection — per-wallet cumulative stats + `logs` daily PnL dict |
-| **Existing baseline** | `daily_trader_rankings` collection — daily composite score snapshots |
-| **Scale** | Exact wallet count TBD from script 01; estimate 50K–500K active accounts |
+**Burst label (self-supervised, reliable).** For asset $a$ and time bin $t$ (e.g. 5-min), let $L\_{a,t}$ = count of liquidation/forced-close events. Define a burst indicator
+$$
+Y^{(h)}_{a,t} = \\mathbf{1}!\\left\[\\ \\sum_{\\tau \\in (t,,t+h\]} L\_{a,\\tau}\\ \\ge\\ Q\_{a}(1-\\alpha)\\ \\right\],
+$$
+with absolute threshold $\theta$ and horizon $h$. **M0 locked the primary operating point at $h = 15$ min, $\theta = 3$** (pooled base rate 3.8%, 52,182 positives); secondary $h = 60$ min, $\theta \ge 5$ (7.9%, 108,807 positives). An absolute threshold is preferred over an asset-quantile $Q_a(1-\alpha)$, which would fix the base rate by construction; the absolute threshold lets base rate track genuine activity. M0 confirmed the label is dense and **strongly learnable — a single past-intensity feature already gives AUC 0.83–0.87** (`m0-burst-findings.md`) — so the modelling target is *incremental lift over the self-exciting baseline*, not mere burst predictability.
 
-**Key data fields enabling the research questions:**
-
-- `action` ∈ {Open, Close, Deposit, Withdraw} — separates entry from exit events (RQ1)
-- `side` ∈ {Long, Short} — enables Long-skill vs Short-skill decomposition (RQ1)
-- `sizeUsd`, `collateralUsd`, `leverage` — leverage-adjusted skill and sizing skill (Ideas 2, 3)
-- `realizedPnl` in `closed_positions` — ground-truth PnL without reconstruction
-- `accounts.logs: dict[str, float]` — daily PnL time series per wallet (RQ2 persistence)
-- `daily_trader_rankings.traders[].score` — existing baseline to compare against
-
-**Data already available — no external APIs needed.** Crowd-follower graph (RQ3) is not in the DB; RQ3 requires either the Nansen/GMGN follower API or scoping out of the thesis.
+**Strict leakage control.** All features for prediction at time $t$ are computed from the window $[t-w, t]$; the label uses $(t, t+h\]$. No random splitting: evaluation is time-ordered rolling-origin walk-forward (reusing the Stage-15 machinery already built), with a purge/embargo gap of $h$ between train and test to prevent horizon leakage.
 
 ______________________________________________________________________
 
-## 5. Evaluation Protocol
+## 4. Feature Engineering
 
-### 5.1 Backtest Design
+Reconstructed per asset (and per venue) from the `logs` event stream on rolling windows:
 
-Rolling forward evaluation: train on months 1–18, test on months 19–24, then slide forward by 6-month windows. Prevent look-ahead bias by using only data available at time of scoring.
-
-### 5.2 Metrics
-
-| Metric | Description |
-|--------|-------------|
-| Hit rate of top-decile wallets | % of top-decile wallets by proposed score that outperform market in next 30d |
-| Copier return | Mean return of followers who copy top-decile wallets at 1-block delay |
-| Calibration | Coverage probability of 95% CI (should be ≈95% on held-out wallets) |
-| Rank correlation | Spearman ρ between proposed multi-dim score and future copier return vs. PnL baseline |
-| Crowd-decay fit | R² of crowd-decay function predicting copier return degradation as $|F_w|$ grows |
-
-### 5.3 Baselines
-
-All baselines are computable from the existing `perpetuals_knowledge_graph` DB:
-
-| Baseline | Source field | Formula |
-|----------|-------------|---------|
-| **B1 — Existing composite** | `daily_trader_rankings.traders[].score` | `risk_reward*0.25 + wl_holding*0.25 + wl_roi*0.25 + win_pct*0.25` |
-| **B2 — Raw PnL rank** | `accounts.PNL` | `sort(PNL, descending)` |
-| **B3 — Raw ROI rank** | `accounts.ROI` | `sort(ROI, descending)` |
-| **B4 — Win-rate rank** | `accounts.profitableRatio` | `sort(profitableRatio, descending)` |
-| **B5 — Sharpe ratio** | `accounts.logs` daily series | `mean(daily_pnl) / std(daily_pnl) * sqrt(365)` |
-| **B6 — zScore (Anon et al., 2025)** | Reimplement on perp data | ML composite from arXiv:2507.20494 |
-| **B7 — Sign-randomization skill classifier (Gomez-Cram et al., 2026)** | `positions.parquet` `win` column, per-wallet trade sequence | Permutation test on directional-accuracy persistence, arXiv:2605.02287. Original code/labels unreleased — reproduced from paper description, validated on the public Polymarket-v1 dataset (arXiv:2606.04217) as a cross-domain sanity check before running on our perp data. |
-| **B8 — Wash-trade / bot flag (Ashfaq, 2023)** | `positionKey` Open/Close sequences | Graph heuristic for colluding rapid buy-sell cycles, arXiv:2305.01543, adapted from public reference implementation (github.com/Dreamerryao/nft-wash-trading). Used as a pre-filter (exclude flagged wallets) rather than a ranking baseline — addresses the manipulation-robustness gap raised by Gao et al. (2026). |
-
-B1–B5 are directly extractable from the DB. B6 requires reimplementation on perp events (the original uses Uniswap v3 swap data). B7 and B8 require no new data — both operate on fields already in `positions.parquet` — but their original code/labels are unreleased (B7) or third-party/unofficial (B8), so both must be implemented from the paper's method description rather than adapted from an authoritative reference.
+1. **Tier crowding.** Classify wallets into small/medium/large tiers (by trailing size percentiles; validated against the `aggregated_assets` tier definitions). Per tier: long/short size imbalance, count imbalance, dominant-side flips.
+1. **Small-vs-large disagreement.** Signed divergence between small- and large-tier net positioning — informed-vs-uninformed flow proxy.
+1. **Positioning concentration.** Herfindahl–Hirschman index of open size across wallets; share of open interest in the top-$k$ wallets.
+1. **Consensus velocity.** First/second differences of net imbalance and concentration — is crowding *accelerating*?
+1. **Leverage stress.** Distribution of `leverage` among currently-open positions; fraction near liquidation-price bands (proxied from entry price, side, leverage).
+1. **Co-positioning-graph topology (ablation).** Build a graph where wallets sharing (asset, side, time-window) are linked; extract centrality and persistent-homology summaries (Betti-0/1, persistence velocity) of the crowd. Honest caveat: this is a constructed graph, not a transfer graph.
+1. **Event-time clock.** Funding-window phase (hourly / 8-hourly known times) as cyclical features — funding *rate* is unobserved, only its *clock* is used.
 
 ______________________________________________________________________
 
-## 6. Novelty Contributions
+## 5. Model
 
-1. **First paper to decompose crypto wallet skill into buy, sell, timing, sizing, and crowd-adjusted components** — no prior DeFi paper applies the Lim (2022) or Van Loon (2018) frameworks to on-chain data.
+**Notation.** Marked point process with events ${(t_i, k_i)}$, mark $k_i = (\\text{tier}, \\text{asset}, \\text{venue})$. Conditional intensity for mark $k$:
+$$
+\\lambda_k(t) ;=; \\underbrace{\\mu_k\\big(x\_{k}(t)\\big)}_{\\text{crowding-modulated baseline}} ;+; \\sum_{k'} \\sum\_{t_j < t} \\alpha\_{k' \\to k}, \\phi!\\left(t - t_j\\right),
+$$
+where $x_k(t)$ is the crowding/graph feature vector (baseline intensity is a link function, e.g. softplus, of features), $\\phi$ is an exponential (or power-law) triggering kernel, and $\\alpha\_{k'\\to k}$ is the cross-mark excitation matrix capturing **cross-tier and cross-venue contagion**. Fit by maximum likelihood (penalized for the excitation matrix); the crowding-modulated baseline is the novel component versus a plain Hawkes.
 
-1. **First Bayesian posterior wallet scoring with credible intervals** — enables uncertainty-aware copy decisions and distinguishes lucky-5-trade wallets from reliably-skilled-500-trade wallets.
+**Variants.** (i) Parametric marked Hawkes (primary); (ii) neural-intensity variant (RNN/transformer conditional intensity) as a stretch extension benchmarked against (i); (iii) a discriminative alternative — gradient-boosted classifier on the same features predicting $Y^{(h)}\_{a,t}$ — as both a baseline and a deployable simple model.
 
-1. **First crowd-adjusted expected copy value** — directly quantifies the decay in actionable edge as a wallet gains followers, filling the gap identified by Liu et al. (2023).
-
-1. **Empirical test of buy/sell orthogonality in crypto** — extends Lim et al. (2022) from mutual funds to on-chain wallets; expected to hold but not confirmed.
-
-______________________________________________________________________
-
-## 7. Limitations and Risks
-
-| Risk | Mitigation |
-|------|-----------|
-| On-chain address fragmentation (one entity, many wallets) | Accounts are platform-scoped `{platform}_{chain}_{address}`; cross-platform identity unification out of scope |
-| Survivorship bias in wallet selection | Include all wallets active ≥20 trades, including those now inactive |
-| Regime non-stationarity | Rolling windows; regime-conditioned model variant |
-| Short trade histories → posterior dominated by prior | Sensitivity analysis on prior strength; min 20-trade threshold (verify wallet count via script 04) |
-| Crowd-follower graph absent from DB | Scope RQ3 to future work OR use `daily_trader_rankings` appearance frequency as crowd-exposure proxy |
-| Gaming of scoring metric | Adversarial robustness analysis following Gao et al. (2026) |
-| ADL events create artificial liquidation spikes | Filter events from known ADL dates (e.g., 2025-10-10 Hyperliquid ADL) in robustness checks |
-| `accounts.logs` field structure unverified | Run sample query before committing to daily-series Bayesian model |
+**Calibration layer.** Wrap the burst-probability output in **Adaptive Conformal Inference** [Gibbs & Candès 2021; Zaffran et al. 2022] to maintain target coverage online under regime shift (RQ3).
 
 ______________________________________________________________________
 
-## 8. Timeline
+## 6. Baselines (all reproducible; contrast with prior project's broken B1–B8)
 
-| Month | Milestone |
-|-------|-----------|
-| 1 | EDA: run scripts 01–07 to characterize wallet population, verify skill dimensions feasible |
-| 2 | Feature engineering: position-level Long/Short alpha, leverage-adjusted ROI, sizing skill from `sizeUsd` |
-| 3–4 | Buy/sell skill estimator: compute `long_alpha` and `short_alpha` per wallet, test orthogonality (RQ1) |
-| 5–6 | Bayesian hierarchical model: PyMC implementation, MCMC sampling, calibration on held-out wallets (RQ2) |
-| 7 | Leverage-adjusted score: `roi / sqrt(leverage)` dimension + liquidation penalty |
-| 8 | Evaluation: backtest against B1–B5 baselines using rolling forward windows |
-| 9–10 | Ablation studies: which skill dimensions drive predictive improvement? |
-| 11–12 | Thesis writing, conference submission (KDD 2027 or ICAIF 2027) |
+| Baseline | Type | Effort |
+|----------|------|--------|
+| Base rate / always-alarm-above-threshold | trivial | one-liner |
+| **Funding/imbalance heuristic** (crowding > τ) | practitioner signal | low |
+| Logistic regression on features | standard | low |
+| **Gradient boosting (LightGBM)** on features | standard, strong | low (installed) |
+| **Past-intensity / univariate Hawkes** — *the bar to beat (M0: AUC ≈ 0.83–0.87)* | point-process | moderate (MLE / `tick`) |
+| **Multivariate Hawkes** [Cao & Palaash 2025], adapted to perps | published SOTA-adjacent | moderate (reimplement from description) |
+| Static (split) conformal vs adaptive conformal | calibration | low |
+
+Only the multivariate-Hawkes and the parametric self-exciting fit require real effort; everything else is a `scikit-learn` / `lightgbm` call on self-contained data. No external dataset or unreleased code is required — a decisive contrast to the prior project's dependence on reproducing eight published wallet scores.
 
 ______________________________________________________________________
 
-## 9. References
+## 7. Evaluation Protocol
 
-Full BibTeX in `references.bib`. Key references:
+- **Splitting.** Rolling-origin walk-forward, time-ordered, per-venue holdout, purge/embargo = $h$. Report mean ± std across folds (reuse Stage-15 code).
+- **Discrimination.** PR-AUC and ROC-AUC (PR-AUC primary due to class imbalance); precision at fixed recall.
+- **Early-warning utility.** Lead-time distribution (how early before the burst the alarm fires) vs false-alarm rate; alarm-precision at operational thresholds.
+- **Calibration.** Reliability diagrams, Brier score, empirical coverage of conformal intervals vs nominal, across regimes.
+- **Contagion evidence.** Estimated branching ratio and cross-mark excitation matrix $\\alpha\_{k'\\to k}$ (interpretable output for RQ2).
+- **Ablations.** Remove tier features / graph features / cross-venue excitation / calibration layer, each independently.
 
-- Lim et al. (2022) — Buy/sell skill asymmetry [doi:10.1007/s11156-022-01065-9]
-- Van Loon (2018) — Timing/sizing decomposition [doi:10.3905/jpm.2018.44.3.025]
-- Kosowski et al. (2006) — Bayesian bootstrap for hedge fund skill [doi:10.1016/j.jfineco.2005.12.009]
-- Berk & van Binsbergen (2015) — AUM-adjusted skill, Bayesian hierarchical model [doi:10.1016/j.jfineco.2015.05.002]
-- Liu, Yang & Tan (2023) — Crowd effects in social trading [doi:10.2139/ssrn.4528456]
-- Gao et al. (2026) — Adversarial copy trading [arXiv:2601.08641]
-- Anon et al. (2025) — zScore DeFi wallet scoring [arXiv:2507.20494]
-- Choi et al. (2025) — VC skill vs. random in heavy tails [arXiv:2605.03980]
-- Papaioannou et al. (2024) — Luck vs. skill in investment competitions [arXiv:2412.04490]
+______________________________________________________________________
+
+## 8. Feasibility, Risks, and Mitigations
+
+| Risk | Severity | Mitigation |
+|------|----------|-----------|
+| **Label base rate too rare/common** at chosen $(h,\\alpha)$ | High | M0 grid over $(h,\\alpha)$; pick balance ~5–20% positive; report sensitivity |
+| Leakage between features and horizon label | High | Strict $[t-w,t]$ / $(t,t+h\]$ split + embargo $h$ |
+| Co-positioning graph weaker than transfer graph | Medium | Carry as ablation, not core claim (stated in review) |
+| No funding-rate data | Medium | Use funding *clock* only; do not claim funding-rate modeling |
+| `aggregated_assets` is a snapshot | Low | Rebuild crowding time series from `logs`; use snapshot only to validate tiers |
+| Cross-venue timestamps mis-aligned | Medium | Normalize to UTC epoch; per-venue models first, then joint |
+| Multivariate Hawkes MLE unstable at 249 assets × 3 tiers × 5 venues | Medium | Restrict marks to top-K assets by liquidation volume; regularize $\\alpha$ |
+
+______________________________________________________________________
+
+## 9. Timeline (indicative, ~6 months)
+
+- **M0 (Weeks 1–2):** Label feasibility — burst base rates over $(h,\\alpha)$ grid; confirm learnability; lock label definition.
+- **M1 (Weeks 3–5):** Feature pipeline (tier crowding, concentration, velocity) from `logs`; leakage-safe windowing on Stage-15 walk-forward.
+- **M2 (Weeks 6–8):** Baselines — heuristic, logistic, LightGBM, univariate Hawkes; first PR-AUC / lead-time numbers.
+- **M3 (Weeks 9–12):** Marked covariate-modulated Hawkes with cross-tier/cross-venue excitation (RQ2); multivariate-Hawkes baseline reimplementation.
+- **M4 (Weeks 13–15):** Adaptive-conformal calibration layer (RQ3); calibration + lead-time/false-alarm evaluation across regimes.
+- **M5 (Weeks 16–18):** Graph-topology ablation (RQ1 add-on); neural-intensity stretch variant if time permits.
+- **M6 (Weeks 19–24):** Full ablations, robustness, writing; submit to ICAIF/KDD-ADS or AFT.
+
+______________________________________________________________________
+
+## 10. Expected Contributions
+
+1. The first **perp, tier-marked, crowding-modulated self-exciting model** of synchronized liquidation bursts (G1, G3).
+1. A **calibrated, drift-aware early-warning system** with lead-time / false-alarm benchmarks, beating heuristic funding/imbalance signals (G2, G4).
+1. An **open, reproducible benchmark** for on-chain liquidation-burst forecasting with self-supervised event-count labels (contrast to noise-limited wallet-skill labels).
+1. Honest evidence on whether **co-positioning-graph topology** adds predictive value when a native transaction graph is unavailable (G5).
+
+______________________________________________________________________
+
+## 11. Status and Next Step
+
+**M0 complete (both gates):** magnet rejected (`m0-magnet-findings.md`), burst label passed and locked at $h=15$ min, $\theta=3$ (`m0-burst-findings.md`). **Now M1:** leakage-safe feature panel (per-asset 5-min bins; past-window tier-crowding / imbalance / concentration / leverage-stress features vs future-window burst label) on a time-ordered split, and the first measurement of **lift over the past-intensity self-exciting baseline** (AUC ≈ 0.83–0.87). Implemented in `pipeline/b01_burst_baseline.py`.

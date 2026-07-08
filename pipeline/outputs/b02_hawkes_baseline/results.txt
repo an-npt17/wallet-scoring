@@ -1,0 +1,19 @@
+  Panel rows: 4,239,195  test bins: 1,271,760
+  Cutoff ts: 1772560200  test positive rate: 0.0056
+
+╔══════════════════════════════════════════════════════════════════╗
+║  FITTING HAWKES (univariate self-exciting, MLE)                  ║
+╚══════════════════════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════════════════╗
+║  FITTING HAWKES (+market cross-excitation, MLE)                  ║
+╚══════════════════════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════════════════╗
+║  OUT-OF-SAMPLE COMPARISON (same test bins as b01)                ║
+╚══════════════════════════════════════════════════════════════════╝
+  model                                ROC-AUC    PR-AUC
+  Hawkes (univariate)                   0.9746    0.1570
+  Hawkes (+market)                      0.9740    0.1568
+  LGBM baseline (past-intensity)        0.9078    0.2281
+  LGBM full (tuned, AP)                 0.9801    0.2502
+
+  (random PR-AUC = positive rate = 0.0056)
