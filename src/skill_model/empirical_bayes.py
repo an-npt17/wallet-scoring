@@ -126,3 +126,79 @@ class EmpiricalBayesSkillService:
             mean_shrinkage=_as_float(posterior["shrinkage"].mean(), default=0.0),
         )
         return posterior, hyperparams
+
+    def fit_continuous_dimension(
+        self,
+        df: pl.DataFrame,
+        dimension: SkillDimension,
+        wallet_col: str,
+        estimate_col: str,
+        sigma2_col: str,
+        n_col: str,
+        min_trades: int,
+    ) -> tuple[pl.DataFrame, DimensionHyperparameters]:
+        sub = (
+            df.select([wallet_col, estimate_col, sigma2_col, n_col])
+            .rename({
+                wallet_col: "wallet",
+                estimate_col: "raw_estimate",
+                sigma2_col: "sigma2",
+                n_col: "n_trades",
+            })
+            .drop_nulls()
+            .filter(pl.col("sigma2") > 0)
+            .filter(pl.col("n_trades") >= min_trades)
+        )
+
+        mu = _as_float(sub["raw_estimate"].mean(), default=0.0)
+        raw_var = _as_float(sub["raw_estimate"].var(), default=0.0)
+        mean_sigma2 = _as_float(sub["sigma2"].mean(), default=_MIN_SIGMA2)
+        tau2 = max(raw_var - mean_sigma2, _MIN_TAU2)
+
+        posterior = sub.with_columns(
+            [
+                (pl.col("sigma2") / (pl.col("sigma2") + tau2)).alias("shrinkage"),
+                pl.lit(mu).alias("_mu"),
+            ]
+        ).with_columns(
+            [
+                (
+                    (1.0 - pl.col("shrinkage")) * pl.col("raw_estimate")
+                    + pl.col("shrinkage") * pl.col("_mu")
+                ).alias("posterior_mean"),
+                ((pl.col("sigma2") * tau2) / (pl.col("sigma2") + tau2))
+                .sqrt()
+                .alias("posterior_sd"),
+            ]
+        ).with_columns(
+            [
+                (pl.col("posterior_mean") - _Z_95 * pl.col("posterior_sd")).alias(
+                    "ci_low"
+                ),
+                (pl.col("posterior_mean") + _Z_95 * pl.col("posterior_sd")).alias(
+                    "ci_high"
+                ),
+                pl.lit(dimension.value).alias("dimension"),
+            ]
+        ).select(
+            [
+                "wallet",
+                "dimension",
+                "n_trades",
+                "raw_estimate",
+                "posterior_mean",
+                "posterior_sd",
+                "ci_low",
+                "ci_high",
+                "shrinkage",
+            ]
+        )
+
+        hyperparams = DimensionHyperparameters(
+            dimension=dimension,
+            n_wallets=len(posterior),
+            mu=mu,
+            tau2=tau2,
+            mean_shrinkage=_as_float(posterior["shrinkage"].mean(), default=0.0),
+        )
+        return posterior, hyperparams

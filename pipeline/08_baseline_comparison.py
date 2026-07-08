@@ -44,10 +44,13 @@ from pipeline._paths import BASELINES_PATH, BAYES_SCORES_PATH
 from pipeline._report import get_output_dir, save_fig, tee_stdout
 
 _SCORE_COLS = [
+    "van_loon_score",
     "bayes_score",
     "posterior_buy",
     "posterior_sell",
     "posterior_timing",
+    "posterior_sizing",
+    "posterior_liquidation",
     "b1_composite",
     "b2_pnl",
     "b3_roi",

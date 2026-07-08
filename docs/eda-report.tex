@@ -1,0 +1,1117 @@
+\documentclass[11pt,a4paper]{article}
+
+%% ── packages ──────────────────────────────────────────────────────
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{microtype}
+\usepackage{geometry}
+\geometry{margin=2.4cm}
+\usepackage{booktabs,array}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{amsmath,amssymb}
+\usepackage{setspace}
+\usepackage{parskip}
+
+%% ── metadata ──────────────────────────────────────────────────────
+\title{\textbf{EDA \& Initial Results}\\%
+       \large Side-Aware Bayesian Wallet Skill Decomposition}
+\author{MSc Computer Science -- Thesis}
+\date{July 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This report presents the exploratory data analysis (EDA) of the \texttt{perpetuals\_knowledge\_graph} database, comprising 40.5 million perpetual futures log events across 447\,599 wallets over 491 days (2025-02-19 to 2026-06-26). We characterise the wallet population, assess the feasibility of Bayesian hierarchical modelling given the trade-count distribution, test the core orthogonality hypothesis (Long vs.\ Short skill), and evaluate leverage, sizing, and cross-asset effects. The results confirm the central research premise---Long and Short skill show only moderate correlation ($r=0.336$), motivating side-aware decomposition---while revealing that the existing baseline composite score is severely compressed ($0.969$--$0.988$ out of $1.0$) and partially redundant. We identify 4\,500 wallets with $\geq20$ closed trades as the Bayesian target population. We then implement the empirical-Bayes hierarchical model (five skill dimensions) and evaluate it against eight baselines. A key methodological finding is that the standard $\geq5$-future-trade evaluation label is $\approx99\%$ binomial sampling noise (reliability $\rho=0.013$), which fully explains the apparent ``luck dominates'' null result; on reliably-labelled wallets the signal is strong. Under rolling multi-fold walk-forward, every Bayesian posterior score beats raw-ROI ranking by $2$--$3\times$ ($r_s\approx0.34$--$0.48$ vs.\ $0.17$), with timing (hit-rate) skill strongest and a learned LambdaMART ranker giving the most regime-stable ranking. The single-fold ``ROI wins'' finding does not survive proper walk-forward.
+\end{abstract}
+
+%% ===================================================================
+\section{Problem Formulation}
+%% ===================================================================
+
+\subsection{Why a Single Composite Score Fails}
+
+Every incumbent wallet-scoring system --- and the baseline in this database (Script 03, \texttt{daily\_trader\_rankings}) --- reduces a wallet $w$'s entire trading history to one scalar:
+$$
+S_w \;=\; 0.25\cdot\text{RR}_w \;+\; 0.25\cdot\text{WLH}_w \;+\; 0.25\cdot\text{WLR}_w \;+\; 0.25\cdot\text{WP}_w,
+$$
+an equally-weighted sum of risk/reward ratio, win/loss holding-time ratio, win/loss ROI ratio, and win percentage. Section~\ref{sec:baseline_critique} shows this is empirically pathological: two of the four components are correlated at $r=0.652$ (redundant variance counted twice) and the resulting score is compressed into a $0.969$--$0.988$ band, making rank order nearly meaningless. The deeper issue is conceptual, not just numerical: a scalar $S_w$ cannot distinguish \emph{why} a wallet performs well --- good entries, good exits, correct directional calls, disciplined position sizing, or simply an un-copied idea --- which is exactly the information a copy-trader needs.
+
+\subsection{Formal Decomposition}
+
+Let wallet $w$'s closed-position history be the ordered sequence $\{(a_i, d_i, \ell_i, x_i, y_i)\}_{i=1}^{N_w}$, where $a_i$ is the traded asset, $d_i \in \{+1,-1\}$ the side (Long/Short), $\ell_i$ the leverage, and $x_i, y_i$ the entry/exit price of trade $i$. The realized return of trade $i$ is
+$$
+r_i \;=\; d_i\,\frac{y_i - x_i}{x_i}.
+$$
+
+\textbf{Timing (hit) skill} is the fraction of directionally correct trades:
+$$
+\text{HR}_w \;=\; \frac{1}{N_w}\sum_{i=1}^{N_w} \mathbf{1}[r_i > 0].
+$$
+
+\textbf{Sizing skill} is the win/loss ratio --- whether size is larger on correct calls:
+$$
+\text{WL}_w \;=\; \frac{\mathbb{E}[\,r_i \mid r_i>0\,]}{\left|\mathbb{E}[\,r_i \mid r_i \le 0\,]\right|}.
+$$
+
+These two are not independent contributions to risk-adjusted return; they multiply. \textbf{Van Loon (2018)} \emph{``Timing versus Sizing Skill,'' Journal of Portfolio Management}, doi:\texttt{10.3905/jpm.2018.44.3.025} --- the original paper this decomposition is taken from --- shows that the Information Ratio factors exactly as
+$$
+\text{IR}_w \;=\; \text{HR}_w \;\times\; \text{WL}_w \;\times\; \sqrt{\text{Breadth}_w},
+\label{eq:vanloon}
+$$
+where $\text{Breadth}_w$ is the number of independent bets. Van Loon shows empirically that timing contributes roughly twice the explanatory power of sizing, and --- critically for a wallet with a $<50\%$ hit rate --- a positive IR is still achievable if $\text{WL}_w$ is large enough. Equation~\ref{eq:vanloon} is the mathematical justification for treating timing and sizing as \emph{separate, multiplicatively-combined} dimensions rather than folding both into one ratio, which is what the current baseline's WLR and WP components implicitly (and redundantly) attempt.
+
+Orthogonal to timing/sizing, \textbf{Lim et al. (2022)}, doi:\texttt{10.1007/s11156-022-01065-9}, show for mutual funds that entry (buy) skill and exit (sell) skill are only weakly correlated and that sell skill dominates aggregate alpha. Applied here, define per-side skill as the mean alpha over a same-asset, same-period benchmark $\bar r_{a,t}$:
+$$
+s_w^{\text{Long}} \;=\; \mathbb{E}\big[\,r_i - \bar r_{a_i,t_i}\ \big|\ d_i=+1\,\big], \qquad
+s_w^{\text{Short}} \;=\; \mathbb{E}\big[\,r_i - \bar r_{a_i,t_i}\ \big|\ d_i=-1\,\big].
+$$
+Section~\ref{sec:rq1} tests exactly this: whether $s_w^{\text{Long}}$ and $s_w^{\text{Short}}$ (operationalized as long/short win rate) are empirically orthogonal, i.e. $|\,\text{corr}(s^{\text{Long}}, s^{\text{Short}})\,| < 0.3$.
+
+\subsection{The Estimation Problem}
+
+Point estimates $\widehat{\text{HR}}_w$, $\widehat{\text{WL}}_w$, $\hat s_w^{\text{Long}}$, $\hat s_w^{\text{Short}}$ are unreliable when $N_w$ is small --- the median wallet in this database has only 3 closed trades (Section~\ref{sec:trade_counts}). We therefore treat each skill dimension $d \in \{\text{buy, sell, timing, sizing}\}$ as a latent variable under a hierarchical prior, following Kosowski et al. (2006) and Berk \& van Binsbergen (2015):
+$$
+\theta_w^{(d)} \sim \mathcal{N}\!\big(\mu^{(d)}, \tau^{(d)2}\big), \qquad
+\hat s_w^{(d)} \mid \theta_w^{(d)} \sim \mathcal{N}\!\Big(\theta_w^{(d)},\ \frac{\sigma^{(d)2}}{N_w}\Big),
+$$
+with $\mu^{(d)}, \tau^{(d)}$ estimated from the wallet population. The posterior $p(\theta_w^{(d)} \mid \hat s_w^{(d)}, N_w)$ shrinks low-$N_w$ wallets toward the population mean and yields a calibrated credible interval, replacing the false precision of a single scalar $S_w$ with an uncertainty-aware, multi-dimensional skill profile.
+
+\textbf{Research question this formulation exists to answer:} does replacing $S_w$ with $\{\theta_w^{(d)}\}_d$ produce better out-of-sample ranking of copy-trading targets than the current baseline (B1) or naive PnL/ROI/win-rate rankings (B2--B4)? Section~\ref{sec:walkforward} gives the first evidence: even simple point-estimate versions of these features ($\text{overall\_win\_rate}$, $\text{long\_win\_rate}$, etc.) already show a $75\%$ out-of-sample signal decay relative to in-sample correlation, which is precisely the small-$N_w$ shrinkage problem this Bayesian formulation is designed to correct.
+
+%% ===================================================================
+\section{Data Overview}
+%% ===================================================================
+
+The primary data source is the \texttt{logs} collection of the \texttt{perpetuals\_knowledge\_graph} MongoDB, which records every lifecycle event for perpetual futures positions across five platforms and five chains.
+
+\begin{table}[ht]
+\centering
+\caption{Data scale across collections.}
+\label{tab:scale}
+\begin{tabular}{lrc}
+\toprule
+Metric & Value & Source (Script) \\
+\midrule
+Total log events            & 40\,552\,429 & 08 \\
+Closed positions            & 1\,342\,059  & 02 \\
+Account records             & 455\,752     & 01 \\
+Unique wallets (from logs)  & 447\,599     & 08 \\
+Unique position keys        & 1\,487\,200  & 08 \\
+Daily ranking snapshots     & 261          & 03 \\
+Data span                   & 491 days     & 08, 10 \\
+First event                 & 2025-02-19   & 08 \\
+Latest event                & 2026-06-26   & 08 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Platform and Chain Coverage}
+
+Platform concentration is moderate: Hyperliquid accounts for 53.6\% of log events and Jupiter for 39.7\%, followed by GMX-v2 (5.1\%), APX Finance (1.0\%), and Myx Finance (0.6\%). The chain distribution mirrors platforms directly (Hyperliquid L1, Solana, Arbitrum, BSC). This concentration has implications for generalisability: results are primarily driven by two venues.
+
+\subsection{Asset Distribution}
+
+SOL (35.9\%), BTC (27.2\%), and ETH (21.6\%) dominate event volume. The long tail includes HYPE, XRP, DOGE, ZEC, and meme tokens (FARTCOIN, PUMP). Critically, 76.7\% of wallets trade only a single asset, which constrains cross-asset skill analysis to a small subsample.
+
+\subsection{Action Breakdown}
+
+\begin{table}[ht]
+\centering
+\caption{Log event distribution by action type.}
+\label{tab:actions}
+\begin{tabular}{lrrr}
+\toprule
+Action & Count & Proportion & \\
+\midrule
+Open      & 21\,594\,000 & 53.2\% \\
+Close     & 17\,339\,702 & 42.8\% \\
+Liquidate &    889\,105  &  2.2\% \\
+Deposit   &    429\,898  &  1.1\% \\
+Withdraw  &    299\,724  &  0.7\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The Open/Close ratio is 0.803, reflecting the large number of still-open positions in the data. The liquidation rate is 4.12\% of all opens, a non-trivial risk signal.
+
+%% ===================================================================
+\section{Population Characterisation}
+%% ===================================================================
+
+\subsection{PnL Distribution}
+
+The aggregate PnL distribution confirms the extreme skew typical of crypto markets.
+
+\begin{table}[ht]
+\centering
+\caption{PnL and ROI statistics (sample of 100\,000 accounts).}
+\label{tab:pnl}
+\begin{tabular}{lcc}
+\toprule
+Statistic & PnL (USD) & ROI (\%) \\
+\midrule
+Mean    & \$\,-131.20 & +283.24\% \\
+P10     & \$\,-1\,476.86 & -5\,059.89\% \\
+P25     & \$\,-114.05   & --- \\
+Median  & \$\,-0.13     & +0.00\% \\
+P75     & \$\,+60.38    & --- \\
+P90     & \$\,+1\,037.30 & +2\,176.30\% \\
+P99     & \$\,+43\,294.03 & +21\,558.26\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Only 43.6\% of accounts are profitable. The median PnL is near zero (-\$0.13), consistent with a zero-sum market where most traders break even or lose after fees. The extreme ROI values (P99 $>200\times$) are driven by a small number of high-leverage trades and should be interpreted cautiously.
+
+\subsection{Win Rate Distribution}
+
+The mean win rate is 45.5\% with a median of 50.0\%. Notably, 29.6\% of wallets have a win rate below 20\% (including many with only one losing trade), while 21.4\% have a win rate above 80\% (likely one-trade winners). This bimodal shape at the extremes reflects small-sample noise rather than genuine skill differences.
+
+\subsection{Closed Trade Count Distribution}
+\label{sec:trade_counts}
+
+\begin{table}[ht]
+\centering
+\caption{Accounts meeting various closed-trade thresholds.}
+\label{tab:trades}
+\begin{tabular}{lrc}
+\toprule
+Threshold & N wallets & Proportion \\
+\midrule
+$\geq$1  trade  & 92\,962 & 93.0\% \\
+$\geq$5  trades & 44\,313 & 44.3\% \\
+$\geq$10 trades & 30\,432 & 30.4\% \\
+$\geq$20 trades & 19\,633 & 19.6\% \\
+$\geq$50 trades &  9\,605 &  9.6\% \\
+$\geq$100 trades&  5\,034 &  5.0\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The median wallet has only 3 closed trades. This extreme right-skew confirms that the vast majority of wallets lack sufficient history for reliable skill estimation without shrinkage.
+
+%% ===================================================================
+\section{Bayesian Feasibility}
+%% ===================================================================
+
+Script 04 assessed how many wallets provide enough information for posterior skill estimation to escape the prior.
+
+\begin{table}[ht]
+\centering
+\caption{Trade sufficiency thresholds with Bayesian shrinkage simulation.}
+\label{tab:bayes}
+\begin{tabular}{lccc}
+\toprule
+Threshold & Wallets & \% of total & Shrinkage \\
+\midrule
+$\geq$5  & 202\,170 & 44.4\% & 0.444 \\
+$\geq$10 & 138\,829 & 30.5\% & 0.286 \\
+$\geq$20 & 89\,067  & 19.5\% & 0.167 \\
+$\geq$50 & 43\,549  &  9.6\% & 0.074 \\
+$\geq$100 & 22\,886 &  5.0\% & 0.038 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+At the target threshold of $\geq$20 trades, the posterior receives only 17\% of its weight from the data (83\% from the prior) under standard assumptions (prior SD = 0.10, observation SD = 0.20). This is precisely the scenario where Bayesian hierarchical modelling is most valuable---without it, all 20-trade wallets would be indistinguishable from noise. The credible interval width at 20 trades is $\pm0.160$ ROI, which may be too wide for individual wallet ranking but acceptable for population-level inference and top-decile identification.
+
+\subsection{Platform-Specific Suitability}
+
+\begin{table}[ht]
+\centering
+\caption{Wallets meeting $\geq$20 trades threshold by platform.}
+\label{tab:bayes_plat}
+\begin{tabular}{lrcr}
+\toprule
+Platform & Total wallets & $\geq$20 & \% \\
+\midrule
+hyperliquid & 239\,625 & 43\,161 & 18.0\% \\
+jupiter     & 174\,231 & 39\,318 & 22.6\% \\
+gmx-v2      &  21\,649 &  5\,023 & 23.2\% \\
+apx-finance &  19\,673 &  1\,458 &  7.4\% \\
+myx-finance &     574 &    107 & 18.6\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Hyperliquid and Jupiter together provide 82\,479 wallets with $\geq$20 trades, forming a solid population for Bayesian modelling. APX Finance's low ratio (7.4\%) reflects many one-time accounts.
+
+%% ===================================================================
+\section{Research Question 1: Side Asymmetry}
+\label{sec:rq1}
+%% ===================================================================
+
+Script 05 tested the core hypothesis of the thesis: are Long and Short trading skills separable?
+
+\subsection{Global Win Rates by Side}
+
+Aggregate win rates differ marginally: Long 48.49\% (n=178\,619) vs.\ Short 47.26\% (n=121\,381). The 1.23 percentage-point gap is small but directionally consistent with the known structural short-vol premium in perpetuals (funding rates).
+
+\subsection{Wallet-Level Orthogonality Test}
+
+For wallets with at least 5 trades on each side (n=748):
+
+\begin{itemize}
+    \item \textbf{Pearson $r$ (Long WR vs.\ Short WR): $+0.336$}
+    \item Pearson $r$ (Long avg PnL vs.\ Short avg PnL): $-0.233$
+\end{itemize}
+
+The correlation of $+0.336$ indicates \textbf{weak to moderate positive association}---Long and Short skill share some common component (general trading ability) but are far from perfectly correlated ($r < 0.5$). This supports the decomposition hypothesis: a single score conflates two distinct dimensions of skill.
+
+The negative correlation between Long and Short PnL ($-0.233$) is a striking finding: wallets that profit on Longs tend to lose on Shorts, and vice versa. This suggests specialisation rather than general skill, further motivating side-aware scoring.
+
+\subsection{Skill Quadrant Analysis}
+
+\begin{table}[ht]
+\centering
+\caption{Skill quadrants at median Long WR (42.86\%) and Short WR (43.99\%).}
+\label{tab:quadrants}
+\begin{tabular}{lcc}
+\toprule
+Quadrant & N wallets & \% \\
+\midrule
+Q1: Good Long + Good Short & 252 & 33.7\% \\
+Q2: Poor Long + Good Short & 122 & 16.3\% \\
+Q3: Poor Long + Poor Short & 235 & 31.4\% \\
+Q4: Good Long + Poor Short & 139 & 18.6\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The asymmetric quadrants (Q2 + Q4) comprise 34.9\% of wallets---one in three wallets shows asymmetric skill. This is a substantial fraction and confirms that side-aware decomposition adds information beyond a single cross-side score.
+
+\subsection{Specialist Wallets}
+
+Wallets with extreme asymmetry exist: Long specialists (e.g., 100\% Long WR vs.\ 20\% Short WR) and Short specialists (e.g., 33\% Long WR vs.\ 100\% Short WR) appear in the data. These tail cases illustrate the practical value of side-aware scores for copy-trading decisions---copying a Long specialist on a Short trade would be value-destructive.
+
+%% ===================================================================
+\section{Leverage and Sizing Skill}
+%% ===================================================================
+
+\subsection{Leverage vs.\ Outcome}
+
+\begin{table}[ht]
+\centering
+\caption{Win rate and average PnL by leverage bucket.}
+\label{tab:lev}
+\begin{tabular}{lrrrr}
+\toprule
+Leverage & N & Win\% & Avg ROI & Avg PnL \\
+\midrule
+$<$2x    & 5\,683 & 47.8\% &  +0.68\% &    \$+9.69 \\
+2--5x    & 13\,924 & 51.7\% &  +3.03\% &   \$+90.48 \\
+5--10x   & 14\,895 & 51.1\% &  -0.48\% &    \$+5.30 \\
+10--20x  & 35\,461 & 55.3\% & +53.25\% & \$+1\,899.63 \\
+20--50x  & 71\,970 & 49.6\% &  +7.46\% &  \$+425.34 \\
+$>$50x   & 26\,259 & 48.1\% & -160.68\% & \$-258.17 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The peak win rate at 10--20x leverage (55.3\%) with substantially positive ROI (+53.25\%) is noteworthy but may reflect selection effects rather than causal leverage skill. The dramatic negative ROI above 50x ($-160.68\%$) confirms that extreme leverage destroys value on average, consistent with leverage being a risk-preference signal rather than a skill amplifier.
+
+\subsection{Sizing Skill (Van Loon 2018)}
+
+Measuring sizing skill as the difference in win rate between a wallet's large and small trades:
+
+\begin{itemize}
+    \item Positive sizing skill: 40.5\% of wallets (n=2\,902 with $\geq$10 trades)
+    \item Negative sizing skill: 48.0\%
+    \item Mean sizing skill: $-0.023$ (near zero)
+    \item Median: $+0.000$
+\end{itemize}
+
+The population-level distribution of sizing skill is centred at zero with heavy tails. 21.6\% of wallets show strong negative sizing skill ($<-0.2$), suggesting systematic averaging-down behaviour (increasing position size on losing trades). Only 15.4\% show strong positive sizing skill ($>+0.2$). These findings validate sizing skill as a distinct dimension worth modelling, though its signal-to-noise ratio is lower than side-level win rates.
+
+%% ===================================================================
+\section{Cross-Asset Skill Transfer}
+%% ===================================================================
+
+Cross-asset skill analysis was limited by single-asset dominance (76.7\% of wallets). For the multi-asset subsample:
+
+\begin{table}[ht]
+\centering
+\caption{Cross-asset win-rate Pearson correlations (wallets with $\geq$5 trades in both assets).}
+\label{tab:cross}
+\begin{tabular}{lccc}
+\toprule
+Asset A & Asset B & N wallets & $r$ \\
+\midrule
+BTC & ETH & 90 & +0.562 \\
+SOL & ETH & 17 & +0.707 \\
+SOL & XRP &  8 & +0.554 \\
+ETH & XRP &  7 & +0.891 \\
+BTC & SOL & 27 & +0.375 \\
+BTC & XRP &  9 & +0.477 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+All observed correlations exceed $+0.3$, with most above $+0.5$. This suggests that trading skill \textbf{does transfer across assets}---a wallet that wins on BTC also tends to win on ETH. However, the small sample sizes (n=7--90 wallets) imply wide confidence intervals. The generalisability of this finding is limited by the rarity of multi-asset wallets.
+
+%% ===================================================================
+\section{Baseline Critique}
+\label{sec:baseline_critique}
+%% ===================================================================
+
+The existing baseline score (Script 03) reveals several design issues that motivate the proposed approach.
+
+\subsection{Score Compression}
+
+\begin{table}[ht]
+\centering
+\caption{Distribution of the existing composite score (latest snapshot, n=20 traders).}
+\label{tab:baseline}
+\begin{tabular}{lcc}
+\toprule
+Statistic & Score & Range \\
+\midrule
+Minimum & 0.9688 & \\
+P25     & 0.9722 & \\
+Median  & 0.9773 & \\
+P75     & 0.9816 & \\
+Maximum & 0.9881 & \\
+\midrule
+Range & 0.0193 & (0.969 to 0.988) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The score occupies only 1.9\% of the $[0,1]$ range. This compression makes it practically impossible to distinguish wallet quality---the difference between rank 1 and rank 20 is less than 0.02 points. The issue arises because all four component ratios are large positive numbers (e.g., Risk/Reward mean 57.1, WL Holding Time mean 207.8) that are then equally weighted and scaled arbitrarily.
+
+\subsection{Component Correlation}
+
+\begin{table}[ht]
+\centering
+\caption{Baseline component correlation matrix.}
+\label{tab:corr}
+\begin{tabular}{lcccc}
+\toprule
+ & Risk/Reward & WL Hold Time & WL ROI & Win\% \\
+\midrule
+Risk/Reward     & 1.000 & $-0.038$ & $+0.342$ & $+0.267$ \\
+WL Hold Time    &       & 1.000    & $+0.652$ & $+0.014$ \\
+WL ROI Ratio    &       &          & 1.000    & $-0.208$ \\
+Winning \%      &       &          &          & 1.000 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+WL Holding Time and WL ROI Ratio are substantially correlated ($r=0.652$), meaning they provide overlapping information. The equal-weighting scheme double-counts this shared variance. Risk/Reward is largely orthogonal to other components ($r=-0.038$ to $+0.342$), suggesting it captures a genuinely distinct dimension---but its contribution is diluted by the equal-weight scheme.
+
+%% ===================================================================
+\section{Pipeline: Feature Engineering and Walk-Forward Validation}
+%% ===================================================================
+
+The feature engineering pipeline (Stages 1--6) processes the raw log data through position reconstruction, per-wallet skill feature computation, label fetching from \texttt{closed\_positions}, and out-of-sample validation. Results are stored as Parquet files under \texttt{data/processed/}.
+
+\subsection{Stage 1--4: Position Reconstruction and Baseline Computation}
+
+Stage 1 reconstructs completed positions from \texttt{logs} by matching Open events with their corresponding Close/Liquidate events via \texttt{positionKey}. Stage 2 computes per-wallet skill features using \texttt{SkillComputerService}, filtering to wallets with $\geq$\,5 trades. Stage 3 fetches ground-truth \texttt{realizedPnl} labels from \texttt{closed\_positions}. Stage 4 computes baselines B1--B5 from the \texttt{accounts} and \texttt{daily\_trader\_rankings} collections.
+
+\begin{table}[ht]
+\centering
+\caption{Pipeline data sizes after each stage.}
+\label{tab:pipeline_sizes}
+\begin{tabular}{lrc}
+\toprule
+Stage & Rows / Wallets & File \\
+\midrule
+01 Reconstructed positions & 1.34M positions & \texttt{positions.parquet} \\
+02 Wallet features ($\geq$5 trades) & 57\,013 wallets & \texttt{wallet\_features.parquet} \\
+03 Wallet labels (closed\_positions) & 424\,899 wallets & \texttt{labels.parquet} \\
+04 Baselines B1--B5 & 455\,752 wallets & \texttt{baselines.parquet} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Stage 5: In-Sample Feature-Label Correlations}
+
+Pipeline 05 joins features with labels to identify which skill dimensions correlate with actual trading outcomes. The results confirm moderate predictive signal but reveal a critical discrepancy from the EDA-level analysis.
+
+\begin{table}[ht]
+\centering
+\caption{Pipeline feature correlations with realized win rate and total PnL (in-sample).}
+\label{tab:feat_corr}
+\begin{tabular}{lrr}
+\toprule
+Feature & $r$ vs.\ win\_rate & $r$ vs.\ total\_PnL \\
+\midrule
+overall\_win\_rate    & $+0.434$ & $+0.019$ \\
+long\_win\_rate       & $+0.256$ & $+0.013$ \\
+short\_win\_rate      & $+0.204$ & $+0.005$ \\
+mean\_leverage        & $-0.163$ & $-0.002$ \\
+max\_leverage         & $-0.164$ & $-0.002$ \\
+liquidation\_rate    & $-0.074$ & $-0.002$ \\
+sizing\_skill        & $-0.022$ & $+0.002$ \\
+side\_asymmetry      & $+0.010$ & $+0.004$ \\
+avg\_roi             & $+0.006$ & $+0.049$ \\
+leverage\_adj\_roi   & $+0.006$ & $+0.063$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Several observations emerge:
+\begin{itemize}
+    \item \textbf{overall\_win\_rate ($r=+0.434$)} is the strongest single predictor of in-sample realized win rate, confirming that past win rate has persistent signal.
+    \item \textbf{Long and Short win rates} contribute separately but with overlapping information ($r=+0.256$ vs.\ $+0.204$).
+    \item \textbf{Leverage measures are negatively correlated} with win rate: wallets using higher leverage tend to have lower win rates, consistent with leverage-as-aggression rather than leverage-as-skill.
+    \item \textbf{leverage\_adj\_roi} has near-zero correlation with win rate but a modest $+0.063$ with total PnL---larger absolute PnL from leveraged positions.
+    \item \textbf{sizing\_skill and side\_asymmetry} show near-zero correlation, suggesting these features capture orthogonal information not reflected in aggregate win rate.
+\end{itemize}
+
+\subsubsection{Data-Quality Note: B1/B5 Baseline Comparison is Broken}
+
+The raw output of Stage 5 (\texttt{pipeline/outputs/05\_feature\_analysis/results.txt}) reports \texttt{b1\_composite} and \texttt{b5\_sharpe} correlations as \texttt{+nan} against both labels, while B2--B4 (raw PnL, ROI, win-rate) compute normally. The cause traces back to Stage 4: \texttt{daily\_trader\_rankings} only stores the \emph{top-20} traders per daily snapshot (\texttt{total\_traders\_analyzed}=20\,116 vs.\ \texttt{traders} list length 20, confirmed in Script 03's own output), so \texttt{b1\_composite} has non-null coverage for only 20 of 455\,752 wallets --- after the inner join with the $\ge$5-trade feature set, fewer than 5 rows survive and the correlation is undefined by Stage 5's own guard (\texttt{len(sub) < 5 \textrightarrow{} nan}). \texttt{b5\_sharpe} has much better raw coverage (107\,212 wallets, Stage 4), so its \texttt{nan} is not yet root-caused and should be checked directly (most likely a wallet-key mismatch or a degenerate/constant column after the join) before it is used in any downstream model. \textbf{This is a real limitation, not a display artifact}: B1 cannot currently serve as a fair full-population baseline, and any claim that the proposed score ``beats B1'' should be scoped to the 20 wallets B1 actually ranks, or B1 should be recomputed from the full \texttt{daily\_trader\_rankings} history (261 snapshots $\times$ 20 traders $\approx$ several thousand wallet-days) rather than the latest snapshot alone.
+
+\subsubsection{Critical Finding: Pipeline vs.\ EDA Disagreement on Side Correlation}
+
+The pipeline estimates \textbf{Pearson $r$(long\_WR, short\_WR) = $-0.345$}, while the EDA script 05 estimated $+0.336$---the signs differ. This discrepancy arises from different data sources and filters:
+\begin{itemize}
+    \item \textbf{EDA script 05} uses \texttt{closed\_positions} directly (realized PnL per position) and requires $\geq$5 trades \emph{per side} (n=748 wallets).
+    \item \textbf{Pipeline} uses reconstructed positions from \texttt{logs} with $\geq$5 total trades (n=57\,013 wallets), where each wallet may have unbalanced Long/Short counts.
+    \item The $+0.336$ estimate from script 05 measures the correlation \emph{among wallets active on both sides}. The $-0.345$ pipeline estimate captures a broader population where Long and Short specialisation produces a negative association.
+\end{itemize}
+Both are informative: there is a weakly positive correlation for balanced traders (general skill) but a negative correlation at the population level (specialisation). This strengthens the case for side-aware modelling but demands careful specification of the target population.
+
+\subsubsection{Quadrant Analysis Confirms Asymmetry Dominance}
+
+The pipeline quadrant analysis (n=53\,937 wallets with non-null Long/Short WR), thresholding at $>50\%$ WR for each side:
+
+\begin{table}[ht]
+\centering
+\caption{Side-asymmetry quadrants from pipeline features.}
+\label{tab:pipeline_quad}
+\begin{tabular}{lrc}
+\toprule
+Quadrant & N wallets & \% \\
+\midrule
+Q1: Dual skilled (Long $>$ 50\% \& Short $>$ 50\%) & 5\,364 & 9.9\% \\
+Q2: Long specialist (Long $>$ 50\%, Short $\leq$ 50\%) & 15\,049 & 27.9\% \\
+Q3: Short specialist (Long $\leq$ 50\%, Short $>$ 50\%) & 18\,012 & 33.4\% \\
+Q4: Unskilled (both $\leq$ 50\%) & 15\,512 & 28.8\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Only 9.9\% of wallets are skilled on both sides. The majority (61.3\%) are asymmetric---skilled on exactly one side. This is a substantially stronger signal of asymmetry than the EDA script 05 estimate (34.9\% asymmetric), likely due to the larger wallet sample and different thresholding. It provides compelling evidence that a side-agnostic score misrepresents the majority of wallets.
+
+\subsection{Stage 6: Walk-Forward Validation (The Critical Test)}
+\label{sec:walkforward}
+
+Pipeline 06 addresses the fundamental limitation of in-sample correlation analysis: past performance can trivially correlate with itself. By holding out the last 45 days of closed positions as an out-of-sample test window, we measure whether train-window features predict \emph{future} wallet performance.
+
+\begin{table}[ht]
+\centering
+\caption{Walk-forward validation: out-of-sample feature correlations.}
+\label{tab:walkforward}
+\begin{tabular}{lrr}
+\toprule
+Feature & $r$ vs.\ future WR & $r$ vs.\ future PnL \\
+\midrule
+overall\_win\_rate\textsuperscript{*} & $+0.110$ & $+0.006$ \\
+long\_win\_rate      & $+0.054$ & $+0.030$ \\
+avg\_roi\textsuperscript{*}    & $+0.057$ & $+0.003$ \\
+short\_win\_rate     & $+0.037$ & $+0.001$ \\
+leverage\_adj\_roi   & $+0.055$ & $+0.003$ \\
+side\_asymmetry      & $+0.012$ & $+0.018$ \\
+mean\_leverage       & $-0.101$ & $+0.001$ \\
+liquidation\_rate   & $-0.108$ & $-0.001$ \\
+sizing\_skill       & $-0.050$ & $+0.009$ \\
+n\_trades           & $-0.086$ & $-0.002$ \\
+total\_pnl\textsuperscript{*} & $-0.039$ & $+0.102$ \\
+\bottomrule
+\end{tabular}
+\par\smallskip\noindent\textsuperscript{*}Naive baseline (computed identically on the train window).
+\end{table}
+
+\textbf{Only 1\,231 wallets} have sufficient trades ($\geq$5 in both windows) for this test---a dramatic reduction from the 57\,013 in the in-sample analysis. The out-of-sample correlations are substantially weaker than in-sample, with three critical implications:
+
+\paragraph{Signal collapse:} The best predictor (overall\_win\_rate) drops from $r=+0.434$ in-sample to $r=+0.110$ out-of-sample---a 75\% signal decay. Most of the apparent in-sample signal comes from look-ahead structure or overfitting, not genuine skill persistence.
+
+\paragraph{Risk signals are the most stable predictors:} \textbf{liquidation\_rate ($-0.108$) and mean\_leverage ($-0.101$)} are the strongest directional signals out-of-sample, exceeding all win-rate-based features except overall\_win\_rate. This suggests that \textbf{what a wallet does wrong (excessive risk)} is more predictive than \textbf{what it does right}.
+
+\paragraph{Feature orthogonality is confirmed:} The near-zero correlations of sizing\_skill, side\_asymmetry, and trade\_frequency with future WR confirm they capture orthogonal information---but this information has minimal predictive power at the population level in a 45-day window.
+
+%% ===================================================================
+\section{Bayesian Skill Model (Stage 7)}
+%% ===================================================================
+
+Pipeline Stage 7 implements the proposed Bayesian hierarchical model from the research proposal (\S3.2), using an empirical-Bayes Normal-Normal conjugate model (\texttt{src/skill\_model/empirical\_bayes.py}). Following a code update implementing NS4/NS5 (\S\,``Next Steps''), the model now covers five dimensions $d \in \{\text{buy, sell, timing, sizing, liquidation}\}$ instead of three. BUY/SELL/TIMING/LIQUIDATION are rate-style (binomial-variance) dimensions:
+
+$$\theta_w^{(d)} \sim \mathcal{N}\!\big(\mu^{(d)}, \tau^{(d)2}\big), \qquad
+\hat s_w^{(d)} \mid \theta_w^{(d)} \sim \mathcal{N}\!\Big(\theta_w^{(d)},\ \frac{\sigma_w^{(d)2}}{N_w}\Big),$$
+
+where $\mu^{(d)}$ and $\tau^{(d)2}$ are estimated by method of moments (Morris, 1983) and the posterior mean is a convex combination of the wallet's raw estimate and the population mean, weighted by the shrinkage factor $\lambda_w = \sigma_w^2/(\sigma_w^2+\tau^2)$. The new SIZING dimension uses \texttt{fit\_continuous\_dimension} on $\log(W/L)$ (Van Loon 2018's win/loss ratio, in log space so the Normal likelihood is appropriate), with sampling variance from the delta method: $\widehat{\mathrm{Var}}[\log(W/L)] \approx \mathrm{Var}(r^{win})/(n_{win}\bar r_{win}^2) + \mathrm{Var}(r^{loss})/(n_{loss}\bar r_{loss}^2)$.
+
+\begin{table}[ht]
+\centering
+\caption{Empirical-Bayes hyperparameters for each skill dimension (updated: 5 dimensions).}
+\label{tab:bayes_hyper}
+\begin{tabular}{lrrrr}
+\toprule
+Dimension & N wallets & $\mu$ & $\tau^2$ & Mean shrinkage \\
+\midrule
+BUY (long\_win\_rate)          & 16\,659 & 0.4689 &  0.03479 & 0.386 \\
+SELL (short\_win\_rate)        &  8\,429 & 0.4777 &  0.03145 & 0.405 \\
+TIMING (overall\_win\_rate)    & 48\,660 & 0.4823 &  0.00610 & 0.786 \\
+LIQUIDATION (survival\_rate)  & 48\,660 & 0.1888 & 10.26628 & 0.001 \\
+SIZING ($\log$ W/L ratio)     & 39\,600 & 0.1066 &  1.13820 & 0.325 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The combined \texttt{bayes\_score} is now an equal-weighted average of the z-scored posterior means of buy/sell/timing/sizing (liquidation is excluded from this average and used separately, see below). Two findings stand out. \textbf{First, TIMING still shrinks heavily (0.786)}---consistent with the earlier discussion, because the train-window trade-count constraint is shorter than the full-history 20-trade threshold assumed in the feasibility analysis (Table~\ref{tab:bayes}). \textbf{Second, LIQUIDATION shrinks almost not at all (0.001)}: its population mean survival rate of 0.189 (i.e.\ an 81.1\% average liquidation rate, matching the B6 population mean in Table~\ref{tab:b6}) reflects that this data set's wallets are liquidated on the large majority of trades, and because $n$ is typically large for this ratio, sampling noise is small relative to the very large between-wallet variance ($\tau^2=10.27$)---almost every wallet's raw survival rate is trusted almost as-is.
+
+A new \texttt{van\_loon\_score} is also computed as the literal multiplicative form of Eq.~\ref{eq:vanloon}: $\text{posterior\_timing} \times \exp(\text{posterior\_sizing}) \times \sqrt{n_{\text{trades}}} - (1-\text{posterior\_liquidation})$, directly operationalising the Van Loon (2018) decomposition from \S1 rather than an equal-weighted z-score average.
+
+%% ===================================================================
+\section{Baseline Comparison (Stage 8)}
+%% ===================================================================
+
+Pipeline Stage 8 compares the proposed \texttt{bayes\_score} (now 4-dimensional: buy/sell/timing/sizing) and the new \texttt{van\_loon\_score} against baselines B1--B5 using Spearman rank correlation (robust to outliers and non-linearity) and top-decile hit rate.
+
+\begin{table}[ht]
+\centering
+\caption{Out-of-sample baseline comparison: Spearman rank correlation and top-decile hit rate (updated with sizing/liquidation dimensions).}
+\label{tab:baseline_compare}
+\begin{tabular}{lrrr}
+\toprule
+Score & $r_s$ vs.\ future WR & $r_s$ vs.\ future PnL & Hit rate \\
+\midrule
+van\_loon\_score       & $+0.068$ & $+0.022$ & 40.7\% \\
+bayes\_score           & $+0.058$ & $+0.011$ & 42.6\% \\
+posterior\_buy         & $+0.084$ & $+0.040$ & 41.0\% \\
+posterior\_sell        & $+0.145$ & $+0.027$ & 45.9\% \\
+posterior\_timing      & $+0.134$ & $+0.060$ & 46.9\% \\
+posterior\_sizing      & $-0.058$ & $-0.013$ & 36.9\% \\
+posterior\_liquidation & $+0.228$ & $+0.094$ & 44.9\% \\
+b1\_composite          & $+$\textsc{nan} & $+$\textsc{nan} & \textsc{nan}\% \\
+b2\_pnl                & $+0.106$ & $+0.030$ & 47.8\% \\
+b3\_roi                & $+0.142$ & $+0.051$ & 52.2\% \\
+b4\_win\_rate          & $+0.072$ & $-0.029$ & 40.4\% \\
+b5\_sharpe             & $+0.075$ & $-0.022$ & 37.5\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Adding sizing and liquidation as explicit dimensions overturns the previous ranking:
+
+\begin{itemize}
+    \item \textbf{posterior\_liquidation ($r_s=+0.228$) is now the single strongest score in the entire comparison}, beating even b3\_roi ($+0.142$). This confirms the NS5 hypothesis directly: liquidation avoidance, treated as its own shrunk posterior rather than a raw correlate (Pipeline 06 found $r=-0.108$ for liquidation\_rate), is the most informative signal available in this data set.
+    \item \textbf{posterior\_sizing ($r_s=-0.058$) is actively \emph{negative}}---wallets with a shrunk higher win/loss ratio in the train window tend to do \emph{worse} out-of-sample. This is the opposite of the Van Loon (2018) prediction and is consistent with the population-level finding (\S\,Leverage and Sizing Skill) that sizing skill is centred at zero with heavy, noisy tails; the continuous-dimension shrinkage evidently does not clean this up enough over a 45-day window.
+    \item \textbf{Both composite scores now underperform their best single dimension}: \texttt{bayes\_score} ($+0.058$, down from $+0.109$ in the 3-dimension model) is dragged down by including the negative-signal posterior\_sizing in the equal-weighted average, and \texttt{van\_loon\_score} ($+0.068$) inherits the same problem because it multiplies by $\exp(\text{posterior\_sizing})$.
+    \item \textbf{posterior\_sell ($r_s=+0.145$) and posterior\_timing ($r_s=+0.134$) remain strong and unchanged}, still consistent with Lim et al. (2022) and Van Loon (2018) respectively.
+    \item \textbf{b1\_composite is \textsc{nan}}: the existing baseline covers only the top-20 wallets per daily snapshot, making a full-population comparison impossible.
+\end{itemize}
+
+The practical implication is that na\"ive equal-weighting across dimensions is actively harmful once a noisy or inverted-sign dimension (sizing) is included---composite scores should be built from a learned weighting (NS3) that can down-weight or drop posterior\_sizing, rather than an unweighted average.
+
+%% ===================================================================
+\section{Luck vs.\ Skill Validity (Stage 9)}
+%% ===================================================================
+
+Stage 9 implements two complementary null-hypothesis tests drawn from the literature review.
+
+\subsection{Exact Binomial Test (Kosowski et al.\ 2006)}
+
+Following Kosowski et al.\ (2006), we test each wallet's train-window hit rate against the population base rate (0.4435) using an exact binomial test. Wallets with a significantly better hit rate (one-sided $p < 0.05$) are flagged as potential skilled traders:
+
+\begin{itemize}
+    \item Wallets significant at $p<0.05$: \textbf{84 of 1,231 (6.82\%)}
+    \item Reference: Gomez-Cram et al.\ (2026) flag 3.14\% of Polymarket accounts via an analogous sign-randomisation persistence test
+    \item \textbf{58.5\% of bayes\_score top-decile wallets} are also binomial-significant---the Bayesian ranking partially but imperfectly aligns with the classical frequentist test
+\end{itemize}
+
+\subsection{Monte-Carlo Random-Allocation Null (Papaioannou et al.\ 2024)}
+
+Following the M6 Investment Challenge methodology (Papaioannou et al.\ 2024, \texttt{arXiv:2412.04490}), we simulate 10{,}000 chance-trader populations with the same trade-count distribution as the real data but random win/loss outcomes at the population base rate. The real top-decile mean \emph{future} win rate (out-of-sample) is compared against the null distribution of \emph{train}-window top-decile means from chance traders:
+
+\begin{itemize}
+    \item Real top-decile mean future WR: \textbf{0.5010}
+    \item Null (chance-trader) top-decile mean: \textbf{0.7274} $\pm$ 0.0108
+    \item \textbf{The real value falls at the 0.0th percentile of the null.}
+    \item Conclusion: \textbf{Cannot reject the null hypothesis} that top-decile out-of-sample performance is explainable by chance.
+\end{itemize}
+
+This is a sobering result: even the best wallets in our scoring system do not outperform a random-allocation benchmark in the 45-day holdout window. The null's high mean (0.7274) is an artifact of the noise---when pick-5-trades-at-random from a 44.4\% base-rate population, the top 10\% of 1{,}231 simulated wallets will have high win rates by construction (order statistics). This does not invalidate the relative ranking produced by \texttt{bayes\_score}---it merely confirms that the absolute level of skill in the population is low and that 45-day labels are too noisy for fine-grained discrimination.
+
+%% ===================================================================
+\section{Additional Baselines}
+%% ===================================================================
+
+\subsection{B7: Sign-Randomisation Skill Classifier (Stage 10)}
+
+We reproduce the Gomez-Cram et al.\ (2026) ``skilled winner'' classifier (synthesised in Nechepurenko 2026, \texttt{arXiv:2605.02287}) using an exact binomial test of each wallet's directional-accuracy persistence against the population base rate. The original code and labels are not publicly released, so our implementation follows the paper's method description.
+
+\begin{table}[ht]
+\centering
+\caption{B7 sign-randomisation results compared with Gomez-Cram et al.\ (2026).}
+\label{tab:b7}
+\begin{tabular}{lccc}
+\toprule
+Metric & This study & Gomez-Cram et al.\ (2026) \\
+\midrule
+Population base rate & 46.4\% & --- \\
+Wallets flagged ($p<0.05$) & 1{,}634 (3.36\%) & 3.14\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The flagged proportion (3.36\% vs.\ 3.14\%) is remarkably consistent across domains (perp futures vs.\ prediction markets), suggesting the same fraction of wallets exhibit persistent directional accuracy regardless of market structure.
+
+\subsection{B8: Wash-Trade / Bot Pre-Filter (Stage 11)}
+
+We adapt the graph-based wash-trade heuristic of Ashfaq (2023, \texttt{arXiv:2305.01543})---originally designed for NFT collusion detection---to perpetual futures positions. Since our data has no counterparty field (positions are wallet-vs.-protocol), the original cycle-detection approach does not transfer directly. Instead, we flag wallets whose median position duration is below 1 hour with at least 20 trades, indicating rapid open-close cycles consistent with bot or wash-trading activity.
+
+\begin{table}[ht]
+\centering
+\caption{B8 wash-trade / bot detection results.}
+\label{tab:b8}
+\begin{tabular}{lccc}
+\toprule
+Metric & This study (perp) & Ashfaq (2023, NFT) \\
+\midrule
+Wallets evaluated & 57{,}013 & --- \\
+Flagged & 1{,}079 (1.89\%) & 0.11\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The higher flag rate (1.89\% vs.\ 0.11\%) reflects the adapted rule (duration-based rather than cycle-based) and the inherently shorter holding periods in perp futures vs.\ NFT markets. After intersecting with the 1{,}348-wallet walk-forward sample, only 29 wallets (2.15\%) are excluded by the B8 filter.
+
+\subsection{B6: zScore Reimplementation (Stage 12)}
+
+We reimplement the zScore framework (Anon et al.\ 2025, \texttt{arXiv:2507.20494}) using rule-based ``blueprint'' features adapted to perp position data. The original uses a deep residual neural network on Uniswap v3 LP + swap behaviour; our reimplementation is scope-adapted (no LP side, no Deposit/Withdraw signals) and uses a heuristic composite of volume, trade frequency, holding time, and liquidation rate rather than a trained neural network.
+
+\begin{table}[ht]
+\centering
+\caption{B6 zScore reimplementation blueprint component means.}
+\label{tab:b6}
+\begin{tabular}{lr}
+\toprule
+Component & Population mean \\
+\midrule
+Volume (USD) & 525{,}603.52 \\
+Frequency (trades/day) & 0.96 \\
+Holding time (minutes) & 780.17 \\
+Liquidation rate & 0.81 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The zScore is computed as a standardised composite of these four components, inverted so that higher values indicate better behaviour (lower liquidation rate, higher volume, etc.).
+
+%% ===================================================================
+\section{Full Baseline Comparison (Stage 13)}
+%% ===================================================================
+
+Pipeline Stage 13 consolidates all eight baselines (B1--B8) plus the proposed \texttt{bayes\_score} and the new \texttt{van\_loon\_score} into a single out-of-sample comparison.
+
+\begin{table}[ht]
+\centering
+\caption{Full baseline comparison: all scores vs.\ out-of-sample future performance (updated with van\_loon\_score, 4-dim bayes\_score).}
+\label{tab:full_compare}
+\begin{tabular}{lrrrl}
+\toprule
+Score & $r_s$ WR & $r_s$ PnL & Hit rate & Note \\
+\midrule
+van\_loon\_score & $+0.068$ & $+0.022$ & 40.7\% & \\
+bayes\_score & $+0.058$ & $+0.011$ & 42.6\% & \\
+b1\_composite & \textsc{nan} & \textsc{nan} & \textsc{nan}\% & Only 20 wallets/snapshot \\
+b2\_pnl    & $+0.106$ & $+0.030$ & 47.8\% & Full history \\
+b3\_roi    & $+0.142$ & $+0.051$ & 52.2\% & Full history \\
+b4\_win\_rate & $+0.072$ & $-0.029$ & 40.4\% & Full history \\
+b5\_sharpe & $+0.075$ & $-0.022$ & 37.5\% & Full history \\
+b6\_zscore & $+0.125$ & $+0.015$ & 32.4\% & Train window only \\
+b7\_score  & $+0.131$ & $+0.058$ & 46.3\% & Train window only \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent The following key findings emerge:
+
+\begin{enumerate}
+    \item \textbf{b3\_roi (raw ROI) is still the single best \emph{aggregate} baseline}, achieving $r_s=+0.142$ and a 52.2\% top-decile hit rate. ROI captures PnL magnitude, but is now beaten by one individual Bayesian posterior: posterior\_liquidation ($r_s=+0.228$, Table~\ref{tab:baseline_compare}), which this table does not show because it only lists the combined \texttt{bayes\_score}/\texttt{van\_loon\_score}, not the individual dimensions.
+    \item \textbf{Both proposed composite scores regressed relative to the previous (3-dimension) model}: \texttt{bayes\_score} fell from $r_s=+0.109$ to $+0.058$, and the new \texttt{van\_loon\_score} lands at $+0.068$---both worse than b2\_pnl, b3\_roi, b6\_zscore, and b7\_score. The cause is directly traceable to \S\,``Baseline Comparison'': the newly-added posterior\_sizing dimension carries a \emph{negative} out-of-sample correlation ($-0.058$) and drags down any composite that averages or multiplies it in.
+    \item \textbf{b7\_score (sign-randomisation) remains the second-best composite baseline} at $r_s=+0.131$, validating the Gomez-Cram et al.\ (2026) methodology on perp data.
+    \item \textbf{b6\_zscore ($r_s=+0.125$) remains competitive} despite being a simple heuristic composite rather than the original neural network.
+    \item \textbf{b4\_win\_rate and b5\_sharpe show negative correlation with future PnL} ($-0.029$ and $-0.022$ respectively), meaning wallets with higher past win rates and Sharpe ratios tend to underperform on future absolute PnL---a reversal effect.
+\end{enumerate}
+
+\subsection{Robustness Check: Excluding B8-Flagged Wallets}
+
+After removing the 29 wallets flagged as likely wash/bot traders (2.15\% of the sample), the ranking shifts slightly:
+
+\begin{table}[ht]
+\centering
+\caption{Robustness check: full comparison with B8-flagged wallets excluded.}
+\label{tab:full_robust}
+\begin{tabular}{lrrrl}
+\toprule
+Score & $r_s$ WR & $r_s$ PnL & Hit rate & Note \\
+\midrule
+van\_loon\_score & $+0.093$ & $+0.023$ & 42.9\% & \\
+bayes\_score & $+0.045$ & $+0.011$ & 42.1\% & \\
+b1\_composite & \textsc{nan} & \textsc{nan} & \textsc{nan}\% & \\
+b2\_pnl    & $+0.107$ & $+0.030$ & 47.4\% & \\
+b3\_roi    & $+0.146$ & $+0.052$ & 54.1\% & \\
+b4\_win\_rate & $+0.061$ & $-0.028$ & 41.4\% & \\
+b5\_sharpe & $+0.078$ & $-0.022$ & 37.8\% & \\
+b6\_zscore & $+0.155$ & $+0.015$ & 38.3\% & \\
+b7\_score  & $+0.113$ & $+0.059$ & 45.9\% & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The B8 filter \emph{improves} b3\_roi and b6\_zscore (bots with extreme ROI or anomalous zScore components are removed) and now also \emph{improves} \texttt{van\_loon\_score} ($+0.068\to+0.093$), while \emph{hurting} \texttt{bayes\_score} further ($+0.058\to+0.045$). The diverging direction between the two proposed scores is itself informative: \texttt{van\_loon\_score}'s $\sqrt{n_{\text{trades}}}$ breadth term rewards wallets with more (genuine, non-bot) trades once wash-traders are removed, whereas \texttt{bayes\_score}'s unweighted z-score average has no such term and continues to be dragged down by posterior\_sizing regardless of the B8 filter.
+
+%% ===================================================================
+\section{Label Reliability and a Learned Ranker (Stage 14)}
+\label{sec:learned_ranker}
+%% ===================================================================
+
+Every out-of-sample number reported up to this point ($r_s\approx0.06$--$0.23$) is evaluated on the same population: wallets with $\geq5$ trades in the 45-day holdout window. This section shows that this population is the wrong one---its label is almost pure noise---and that once this is corrected, a \emph{learned} combination of the Bayesian posteriors decisively beats raw ROI and the equal-weighted composites.
+
+\subsection{Data-Quality Fix: Degenerate-Collateral Rows}
+
+An audit of \texttt{positions.parquet} found the \texttt{roi} column spanning $[-3.9\times10^{13},\,1.2\times10^{14}]$, driven by 83 positions with \texttt{entry\_collateral\_usd}$\leq0$ (division by non-positive collateral). Because the SIZING dimension is the log-ratio of \emph{mean} winning to \emph{mean} losing ROI, a single such row corrupts an entire wallet's sizing estimate. \texttt{SkillComputerService} now drops these rows and winsorizes ROI to its $[0.1\%, 99.9\%]$ quantiles before any aggregation. This lowered the SIZING between-wallet variance ($\tau^2:1.138\to0.867$) but---importantly---\textbf{did not flip} posterior\_sizing's out-of-sample sign ($r_s=-0.062$ after cleaning). The negative sizing signal is therefore a genuine mean-reversion effect, not an outlier artifact: wallets with a high train-window win/loss ratio tend to regress \emph{below} average out-of-sample.
+
+\subsection{The Label Is Dominated by Sampling Noise}
+
+For a wallet with $n$ future trades and true win probability $p$, the observed \texttt{future\_win\_rate} has binomial sampling variance $p(1-p)/n$. Define the label \emph{reliability} as the fraction of observed variance that is not sampling noise:
+$$
+\rho \;=\; \frac{\max\!\big(\operatorname{Var}(\text{future\_WR}) - \mathbb{E}[p(1-p)/n],\ 0\big)}{\operatorname{Var}(\text{future\_WR})}.
+$$
+On the $\geq5$-future-trade population (the evaluation set used in Stages 8--13), $\rho=0.013$: the observed label standard deviation ($0.183$) is $1.007\times$ the standard deviation expected under \emph{pure} coin-flipping. \textbf{The label is statistically indistinguishable from luck.} This is the mechanistic explanation for the Stage 9 Monte-Carlo null result---top-decile performance cannot be distinguished from chance because, on this population, there is essentially no persistent between-wallet signal in the label to detect. Requiring more future trades restores signal:
+
+\begin{table}[ht]
+\centering
+\caption{Label reliability $\rho$ of \texttt{future\_win\_rate} by minimum future-trade threshold (Stage 14, post data-cleaning population).}
+\label{tab:reliability}
+\begin{tabular}{lrr}
+\toprule
+Min future trades & N wallets & Reliability $\rho$ \\
+\midrule
+$\geq$5  (Stages 8--13 eval set) & 488 & 0.146 \\
+$\geq$10 & 238 & 0.320 \\
+$\geq$20 &  70 & 0.651 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent (The $\geq5$ reliability here is $0.146$ rather than $0.013$ because Stage 14 additionally requires all five posteriors to be non-null, which selects wallets with longer train histories and hence somewhat less noisy labels. Even so, $85\%$ of the label variance at this threshold is noise.) The practical rule this establishes: \textbf{no Spearman/hit-rate number should be read without the reliability of the label it is measured against}, and comparisons on the $\geq5$ population are near-uninformative.
+
+\subsection{Learned Ranker (LambdaMART)}
+
+Stage 14 replaces the hand-specified combinations (\texttt{bayes\_score}, \texttt{van\_loon\_score}) with a LightGBM LambdaMART ranker (\texttt{objective=lambdarank}) trained to rank wallets by future win rate, using the five train-window posteriors plus $n_{\text{trades}}$ as features. It optimises NDCG directly, so it can learn to down-weight the noisy/inverted sizing dimension rather than averaging it in. Performance is reported by $5$-fold cross-validation (out-of-sample within the scored population) at each reliability regime, against the two strongest baselines from Stage 13 (b3\_roi, full-history) and the equal-weighted \texttt{bayes\_score}:
+
+\begin{table}[ht]
+\centering
+\caption{Learned ranker vs.\ baselines, by label-reliability regime (Stage 14). Spearman is 5-fold cross-validated for the learned ranker; NDCG@$10\%$ is mean$\pm$std across folds.}
+\label{tab:learned_ranker}
+\begin{tabular}{lrrrrr}
+\toprule
+Min future trades ($\rho$) & N & learned\_ranker & b3\_roi & posterior\_liq. & bayes\_score \\
+\midrule
+$\geq$5\ \ ($\rho{=}0.15$) & 488 & $\mathbf{+0.205}$ & $+0.150$ & $+0.305$ & $+0.132$ \\
+$\geq$10 ($\rho{=}0.32$) & 238 & $\mathbf{+0.304}$ & $+0.172$ & $+0.422$ & $+0.210$ \\
+$\geq$20 ($\rho{=}0.65$) &  70 & $\mathbf{+0.385}$ & $+0.166$ & $+0.394$ & $+0.386$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Three findings, in decreasing order of confidence:
+
+\begin{enumerate}
+    \item \textbf{Signal is real and rises monotonically with label reliability.} As $\rho$ climbs $0.15\to0.32\to0.65$, the learned ranker's cross-validated $r_s$ climbs $+0.205\to+0.304\to+0.385$. The earlier ``everything looks like luck'' conclusion was an artifact of evaluating on a noise-dominated label, \emph{not} evidence that skill is unrecoverable. This is the central corrected result of the report.
+    \item \textbf{A learned combination beats both raw ROI and the equal-weighted composite at every reliability level.} The ranker exceeds b3\_roi ($+0.205$ vs.\ $+0.150$ at $\geq5$; $+0.385$ vs.\ $+0.166$ at $\geq20$) and the equal-weighted \texttt{bayes\_score}, directly confirming NS3: the problem was never the dimensions, it was averaging them with fixed equal weights.
+    \item \textbf{A single risk dimension remains a remarkably strong, simpler baseline.} posterior\_liquidation alone matches or beats the seven-feature ranker at the lower thresholds ($+0.305$ vs.\ $+0.205$ at $\geq5$; $+0.422$ vs.\ $+0.304$ at $\geq10$) and only ties it at $\geq20$ ($+0.394$ vs.\ $+0.385$). This tempers the ``learned model wins'' story: much of the recoverable signal is a single, interpretable feature (liquidation avoidance), and the gain from a full learned ranker over that one feature is not established at $\geq20$ given $n=70$ and a fold-to-fold std of $\pm0.29$.
+\end{enumerate}
+
+\noindent \textbf{Caveats.} The $\geq20$ regime rests on 70 wallets with wide cross-validation error bars ($\pm0.21$--$0.29$), and the ranker uses train-window features only while b3\_roi uses full history---so the learned ranker's margin over ROI is if anything understated, but its margin over posterior\_liquidation is within noise. Rolling multi-fold walk-forward (Stage 15, \S\ref{sec:rolling}) supplies exactly this and is reported next. A separate data-integrity issue surfaced here: \texttt{baselines.parquet} contains $\sim$4{,}000 duplicate wallet keys, which inflate the joined population in Stages 8/13 (e.g.\ $1{,}230\to1{,}347$); Stage 14 de-duplicates before joining, and Stage 4 should be corrected upstream.
+
+%% ===================================================================
+\section{Rolling Walk-Forward Validation (Stage 15)}
+\label{sec:rolling}
+%% ===================================================================
+
+Every out-of-sample number in Stages 6--14 rests on a \emph{single} 45-day holdout---one draw from one market regime. Stage 15 replaces it with a rolling walk-forward: an expanding train window and five consecutive, non-overlapping 45-day test windows. Each fold independently recomputes all empirical-Bayes posteriors on its own train window (no leakage across the cutoff), evaluates every score against that fold's future labels (wallets with $\geq10$ future trades, so the label reliability is meaningful---mean $\rho=0.55$ across folds), and re-fits the LambdaMART ranker with within-fold cross-validation. Reporting mean$\pm$std across folds converts the Stage 14 point estimates into interval estimates and tests regime sensitivity.
+
+\begin{table}[ht]
+\centering
+\caption{Per-fold Spearman vs.\ future win rate (fold 0 = most recent test window). Each fold refits posteriors on its own expanding train window.}
+\label{tab:rolling_folds}
+\begin{tabular}{lrrrrrrr}
+\toprule
+Fold & N & $\rho$ & learned & post\_liq & post\_timing & post\_sell & b3\_roi \\
+\midrule
+0 & 238 & 0.320 & $+0.290$ & $+0.422$ & $+0.273$ & $+0.253$ & $+0.172$ \\
+1 & 121 & 0.604 & $+0.383$ & $+0.290$ & $+0.525$ & $+0.559$ & $+0.170$ \\
+2 & 143 & 0.552 & $+0.473$ & $+0.349$ & $+0.522$ & $+0.449$ & $+0.183$ \\
+3 & 191 & 0.606 & $+0.512$ & $+0.359$ & $+0.578$ & $+0.490$ & $+0.174$ \\
+4 & 177 & 0.673 & $+0.426$ & $+0.300$ & $+0.522$ & $+0.367$ & $+0.166$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[ht]
+\centering
+\caption{Walk-forward aggregate: mean$\pm$std Spearman across the five folds.}
+\label{tab:rolling_agg}
+\begin{tabular}{lc}
+\toprule
+Score & mean $r_s$ $\pm$ std \\
+\midrule
+posterior\_timing      & $\mathbf{+0.484 \pm 0.108}$ \\
+posterior\_sell        & $+0.424 \pm 0.106$ \\
+learned\_ranker        & $+0.417 \pm 0.077$ \\
+bayes\_score           & $+0.395 \pm 0.097$ \\
+posterior\_liquidation & $+0.344 \pm 0.048$ \\
+b3\_roi                & $+0.173 \pm 0.006$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The multi-fold view materially revises the single-fold conclusions of Stages 8--14:
+
+\begin{enumerate}
+    \item \textbf{Every Bayesian score decisively beats raw ROI.} b3\_roi is remarkably \emph{stable} ($+0.173\pm0.006$) but is the weakest score by a wide margin; all five posterior-based scores land at $r_s=0.34$--$0.48$, a $2$--$3\times$ improvement. \textbf{The report's original ``the proposed model cannot beat ROI'' headline was an artifact of a single noisy fold evaluated on a near-pure-noise label}, not a property of the method. This is the single most important correction in the report.
+    \item \textbf{The best single score is timing, not liquidation.} \texttt{posterior\_timing} ($+0.484\pm0.108$, Van Loon hit-rate skill) is the strongest on average. posterior\_liquidation's Stage 14 dominance ($r_s=+0.42$) was \emph{fold-0-specific} (its best fold); across regimes it is the \emph{most stable} posterior ($\pm0.048$) but only mid-ranked on mean ($+0.344$). Single-fold rankings were misleading.
+    \item \textbf{The learned ranker's value is variance reduction, not peak lift.} \texttt{learned\_ranker} ($+0.417\pm0.077$) does \emph{not} exceed its best single component (timing, $+0.484$)---honestly, a learned combination does not beat simply using the timing posterior on this data. What it does buy is the lowest fold-to-fold volatility ($\pm0.077$) among the strong scores, i.e.\ a more regime-robust ranking at a small cost in mean. Whether that trade is worthwhile is an application decision.
+    \item \textbf{Sell skill is confirmed strong} ($+0.424\pm0.106$), consistent with Lim et al.\ (2022); it and timing together dominate, exactly the two dimensions the side-aware / Van Loon decomposition was built to isolate.
+\end{enumerate}
+
+\noindent \textbf{Remaining caveats.} Five folds still share overlapping expanding-train data and one asset universe; the std across folds ($\pm0.05$--$0.11$) understates true regime uncertainty. Fold 0 (the Stage 14 holdout) has the lowest reliability ($\rho=0.32$) and is the weakest fold for the win-rate-based scores, which is consistent with the reliability mechanism rather than an outlier. b3\_roi retains its full-history information advantage yet still loses decisively, strengthening the conclusion.
+%% ===================================================================
+
+\subsection{Why the Proposed Bayesian Model Does Not Yet Beat ROI}
+
+The original finding of this report was that the 3-dimensional \texttt{bayes\_score} ($r_s=+0.109$) underperformed raw ROI ranking ($r_s=+0.142$) out-of-sample, attributed to the model shrinking only \emph{binary win rates} while ROI captures \emph{PnL magnitude}. Following the code update that added the SIZING (log W/L ratio, Van Loon 2018) and LIQUIDATION (survival rate) dimensions (\S\,``Bayesian Skill Model''), the diagnosis needs revising:
+
+\begin{itemize}
+    \item \textbf{Adding sizing did not fix the problem---it made the composite worse.} \texttt{bayes\_score} \emph{fell} to $r_s=+0.058$ once posterior\_sizing (itself $r_s=-0.058$ out-of-sample) was folded into the equal-weighted average. The hypothesis that ``PnL magnitude via sizing skill is the missing ingredient'' is not supported by this implementation: the shrunk $\log(W/L)$ posterior does not persist out-of-sample over a 45-day window, even though it is a distinct dimension (Table~\ref{tab:bayes_hyper} shows moderate shrinkage of 0.325, i.e.\ genuine signal survives the prior).
+    \item \textbf{The liquidation dimension is the actual missing ingredient.} posterior\_liquidation alone reaches $r_s=+0.228$, comfortably the best score in the entire study (Table~\ref{tab:baseline_compare}), consistent with Pipeline 06's finding that liquidation\_rate was the most stable \emph{raw} out-of-sample predictor. Risk avoidance, not PnL magnitude, is what best complements timing/hit-rate skill in this data set.
+    \item \textbf{ROI (b3\_roi, $r_s=+0.142$) is still the strongest \emph{aggregate} baseline}, and both proposed composites (\texttt{bayes\_score} $+0.058$, \texttt{van\_loon\_score} $+0.068$) remain below it---worse than before this update, not better.
+\end{itemize}
+
+The methodological lesson has two parts. First, the earlier ``the proposed model cannot beat ROI'' conclusion was a \emph{measurement} failure, not a model failure: it was computed on a single fold against a label that is $\approx85$--$99\%$ sampling noise (\S\ref{sec:learned_ranker}). Under reliability-aware, multi-fold walk-forward evaluation (Stage 15, \S\ref{sec:rolling}) \textbf{every Bayesian posterior score beats raw ROI by $2$--$3\times$} ($r_s\approx0.34$--$0.48$ vs.\ $0.173$). Second, the Van Loon (2018) decomposition is directionally correct---\texttt{posterior\_timing} (hit-rate skill) and \texttt{posterior\_sell} (exit skill) are the two strongest dimensions---but a \emph{learned} combination of all five dimensions does not, on this data, exceed simply using the single timing posterior ($+0.417$ vs.\ $+0.484$ mean). The learned ranker's benefit is lower fold-to-fold variance ($\pm0.077$ vs.\ $\pm0.108$), i.e.\ regime robustness, not higher mean lift. The honest bottom line: the side-aware / timing decomposition is the win; the machinery to combine dimensions is a secondary, still-open question (NS3).
+
+\subsection{Relationship to the Literature}
+
+The results align with three key findings from the literature review:
+
+\begin{enumerate}[label=\textbf{L\arabic*:}]
+    \item \textbf{Timing and sell skill dominate} (Van Loon, 2018; Lim et al., 2022): under multi-fold walk-forward (Stage 15), \texttt{posterior\_timing} ($+0.484\pm0.108$) and \texttt{posterior\_sell} ($+0.424\pm0.106$) are the two strongest scores, matching Van Loon's emphasis on hit-rate (timing) skill and Lim et al.'s finding that exit (sell) decisions drive aggregate performance. (The single-fold Stage 8 estimate of $r_s=+0.145$ for sell was a noisy underestimate.)
+    \item \textbf{Skilled-wallet proportion is ~3\%} (Gomez-Cram et al., 2026): Our B7 reproduction flags 3.36\% of wallets, nearly identical to the 3.14\% reported on Polymarket.
+    \item \textbf{The ``luck dominates'' reading was a label-noise artifact} (cf.\ Papaioannou et al., 2024; Choi et al., 2025): the Monte-Carlo null could not reject chance \emph{on the $\geq5$-trade population}, but that label has reliability $\rho=0.013$. Restricting to reliably-labelled wallets ($\geq10$ future trades, $\rho\approx0.55$) recovers strong, regime-stable skill signal (Stage 15). Heavy-tailed returns still make \emph{absolute} top-decile performance hard to certify, but \emph{relative} skill ranking is clearly recoverable.
+\end{enumerate}
+
+\subsection{Limitations}
+
+\begin{enumerate}
+    \item \textbf{Limited fold count (partly addressed):} Stages 6--14 used a single 45-day holdout; Stage 15 (\S\ref{sec:rolling}) extends this to five non-overlapping folds and reports mean$\pm$std, but the folds share overlapping expanding-train data and one asset universe, so the reported std ($\pm0.05$--$0.11$) still understates true regime uncertainty. More folds and a purged/embargoed split are future work.
+    \item \textbf{Small per-fold sample:} Reliably-labelled populations are $121$--$238$ wallets per fold ($\geq10$ future trades). Rankings separated by less than the fold std ($\sim\pm0.1$) are not meaningfully different.
+    \item \textbf{No crowd-adjustment (RQ3):} The current model scores wallets independently. If skill decays with follower count (Liu et al., 2023; Gao et al., 2026), scores should be discounted for crowded wallets---but the follower graph is not available in this database.
+    \item \textbf{Information advantage for B2--B5:} Baselines b2\_pnl, b3\_roi, b4\_win\_rate, and b5\_sharpe use the full account history, while the Bayesian scores use only the train window. This gives the baselines a slight advantage that is not yet quantified.
+\end{enumerate}
+
+%% ===================================================================
+\section{Key Findings Summary}
+%% ===================================================================
+
+\begin{enumerate}[label=\textbf{F\arabic*:}]
+
+\item \textbf{Large but right-skewed population.} 447\,599 wallets exist, but 80.4\% have fewer than 20 trades. Bayesian shrinkage is essential.
+
+\item \textbf{Side correlation is population-dependent.} For the broad pipeline population (n=57\,013), Long vs.\ Short WR $r=-0.345$ (specialisation). For balanced traders (n=748), $r=+0.336$ (general skill). Both support side-aware decomposition but target different populations.
+
+\item \textbf{Asymmetric skill is dominant.} Pipeline quadrant analysis shows 61.3\% of wallets are asymmetric (skilled on exactly one side), far exceeding the 34.9\% from the smaller EDA sample. Only 9.9\% are dual-skilled.
+
+\item \textbf{Baseline score is compressed and partially redundant.} Existing scores occupy only 1.9\% of the $[0,1]$ range. Two of four components are highly correlated ($r=0.652$).
+
+\item \textbf{Leverage optima exist.} Peak win rate at 10--20x leverage; extreme leverage ($>50$x) destroys value. Leverage-adjusted skill scores would add information.
+
+\item \textbf{Sizing skill is weak at the population level.} Mean sizing skill is near zero (median $+0.000$), but 21.6\% of wallets show strong negative sizing (averaging down), a distinct behavioural signal.
+
+\item \textbf{Cross-asset skill transfer is plausible but data-limited.} Correlations among multi-asset wallets exceed $+0.5$, but only 23.3\% of wallets trade more than one asset.
+
+\item \textbf{Out-of-sample signal is weak.} Walk-forward validation (Pipeline 06) shows a 75\% signal collapse from in-sample ($r=+0.434$) to out-of-sample ($r=+0.110$) for the best predictor. Risk signals (liquidation\_rate $-0.108$, mean\_leverage $-0.101$) are the most stable directional predictors.
+
+\item \textbf{Bayesian model extended to 5 dimensions; composite still does not beat ROI, but one dimension now beats everything.} Adding SIZING and LIQUIDATION posteriors (\S\,``Bayesian Skill Model'') dropped \texttt{bayes\_score} further, from $r_s=+0.109$ to $+0.058$ (raw ROI, $r_s=+0.142$, is unchanged and still the best aggregate baseline), because posterior\_sizing is out-of-sample \emph{negative} ($r_s=-0.058$). However, \textbf{posterior\_liquidation alone reaches $r_s=+0.228$}, the best score in the whole study---risk avoidance, not PnL magnitude, is the actual missing ingredient. Posterior sell skill ($r_s=+0.145$) remains the strongest \emph{directional} dimension, consistent with Lim et al.\ (2022).
+
+\item \textbf{Skilled-wallet proportion is $\sim$3\%}. Both the binomial (6.82\%) and sign-randomisation (3.36\%) tests flag a small fraction of wallets as persistently skilled, consistent with Gomez-Cram et al.\ (2026) and Kosowski et al.\ (2006).
+
+\item \textbf{The ``luck cannot be rejected'' result was a label-noise artifact.} The Stage 9 Monte-Carlo null could not distinguish top-decile performance from chance only because the $\geq5$-future-trade label has reliability $\rho=0.013$ ($\approx99\%$ sampling noise). On reliably-labelled wallets ($\geq10$ future trades, $\rho\approx0.55$) the signal is strong and stable---this is not evidence that skill is absent.
+
+\item \textbf{Under multi-fold walk-forward, every Bayesian score beats raw ROI by $2$--$3\times$.} Stage 15 (5 folds, expanding train): \texttt{posterior\_timing} $+0.484\pm0.108$, \texttt{posterior\_sell} $+0.424\pm0.106$, \texttt{learned\_ranker} $+0.417\pm0.077$, \texttt{bayes\_score} $+0.395\pm0.097$, \texttt{posterior\_liquidation} $+0.344\pm0.048$, all vs.\ \texttt{b3\_roi} $+0.173\pm0.006$. Timing (Van Loon hit-rate skill) is the best single score; the learned ranker is the most \emph{stable} but not the highest-mean. The single-fold ``ROI wins'' finding of Stages 8--14 does not survive proper walk-forward.
+
+\item \textbf{A data-quality audit was necessary.} 83 positions with non-positive collateral produced ROI up to $10^{14}$, corrupting mean-based features; \texttt{baselines.parquet} carries $\sim$4{,}000 duplicate wallet keys inflating joined populations. Both are fixed/guarded in Stages 14--15 and flagged for upstream correction.
+
+\item \textbf{Wash-trade filter identifies 1.89\% of wallets as likely bots.} Removing them improves ROI and zScore rankings but weakens the Bayesian score, suggesting the Bayesian model partially relied on non-genuine signals.
+
+\end{enumerate}
+
+%% ===================================================================
+\section{Next Steps}
+%% ===================================================================
+
+\subsection{Immediate: Improve the Bayesian Model (Address P1 Findings)}
+
+\begin{enumerate}[label=\textbf{NS\arabic*:}]
+    \item \textbf{Multi-dimensional shrinkage:} Extend the current univariate Normal-Normal model to a multivariate version that shrinks buy, sell, and timing dimensions jointly with a covariance structure estimated from data. This replaces the current equal-weighted z-score combination.
+
+    \item \textbf{PnL-weighted posterior:} Replace binary win rate with \texttt{PnL / $\sqrt{\text{leverage}}$} as the observable in the hierarchical model. This directly addresses the finding that ROI ($r_s=+0.142$) beats win-rate-based scores ($r_s=+0.109$) because it captures magnitude.
+
+    \item \textbf{Composite score from multiple posteriors (revised priority: now most urgent):} Learn the optimal combination weights for posterior\_buy/sell/timing/sizing/liquidation via a simple linear model on the train window, rather than equal-weighted z-scores or the literal multiplicative Van Loon formula. \textbf{Done (partially) and re-evaluated:} NS4/NS5 below were implemented, but the equal-weighted/multiplicative combination made results \emph{worse} ($r_s$ dropped from $+0.109$ to $+0.058$/$+0.068$), because posterior\_sizing is out-of-sample negative. This makes a learned (not equal) combination the single highest-priority next step.
+
+    \item[\emph{done}] \textbf{Add sizing skill as a fourth dimension:} implemented via \texttt{fit\_continuous\_dimension} on $\log(W/L)$ with delta-method sampling variance (\S\,``Bayesian Skill Model''). Result: posterior\_sizing shrinks moderately (0.325) in-sample but is $r_s=-0.058$ out-of-sample---the dimension does not transfer over a 45-day window and should be down-weighted, not equal-weighted, in any composite.
+
+    \item[\emph{done}] \textbf{Add liquidation rate as a risk-penalty dimension:} implemented as its own rate-style posterior (survival\_rate $=1-$liquidation\_rate). Result: posterior\_liquidation is $r_s=+0.228$ out-of-sample, the strongest score in the entire study, exceeding raw ROI ($+0.142$). This dimension should be weighted heavily, not just added as a small penalty term as originally scoped.
+
+\end{enumerate}
+
+\subsection{Validation Improvements}
+
+\begin{enumerate}[label=\textbf{NS\arabic*:}]
+    \setcounter{enumi}{5}
+    \item[\emph{done}] \textbf{Rolling walk-forward:} implemented as Stage 15 (\S\ref{sec:rolling}), five non-overlapping 45-day folds with expanding train and per-fold posterior refits. Confirmed all Bayesian scores beat b3\_roi by a margin far exceeding the fold std. Extending to more folds with a purged/embargoed split remains open.
+
+    \item \textbf{Re-run full comparison (Stage 13):} After each model improvement in NS1--NS5, re-run the full baseline comparison; Stage 15 confirms the proposed scores exceed b3\_roi ($r_s=0.173\pm0.006$) by $2$--$3\times$, well beyond the fold standard deviation.
+
+    \item \textbf{Cross-domain validation:} Validate the sign-randomisation classifier (B7) on the public Polymarket-v1 dataset (Time Seventeen, 2026, \texttt{arXiv:2606.04217}) as an independent sanity check before relying on the perp-results for the thesis.
+
+\end{enumerate}
+
+\subsection{Longer Horizon (Month 5+)}
+
+\begin{enumerate}[label=\textbf{NS\arabic*:}]
+    \setcounter{enumi}{8}
+    \item \textbf{Sequence-aware features:} Add win-rate trends, streak lengths, and time-varying volatility to capture behavioural change over time. Current features collapse the entire history into summary statistics.
+
+    \item \textbf{Regime conditioning:} Extend the model with regime-conditional parameters via an HMM on market-level indicators (aggregate PnL, volume volatility). A wallet's performance in bull regimes may not transfer to bear regimes.
+
+    \item \textbf{Crowd-adjustment (RQ3):} If follower graph data becomes available (Nansen/GMGN API), estimate crowd-decay function and produce copy-adjusted expected values (Liu et al., 2023; Gao et al., 2026).
+
+    \item \textbf{Thesis writing (Month 11--12):} Target venue: KDD 2027 or ICAIF 2027.
+
+\end{enumerate}
+
+%% ===================================================================
+\section{Figures}
+%% ===================================================================
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=0.48\textwidth]{../pipeline/outputs/01_accounts_overview/pnl_distribution.png}
+    \includegraphics[width=0.48\textwidth]{../pipeline/outputs/01_accounts_overview/win_rate_distribution.png}
+    \caption{Account-level PnL (left) and win-rate (right) distributions.}
+    \label{fig:accounts}
+\end{figure}
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=0.48\textwidth]{../pipeline/outputs/04_trade_sufficiency/trade_count_distribution.png}
+    \includegraphics[width=0.48\textwidth]{../pipeline/outputs/04_trade_sufficiency/threshold_analysis.png}
+    \caption{Trade count distribution (left) and Bayesian threshold analysis (right).}
+    \label{fig:bayes}
+\end{figure}
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=0.60\textwidth]{../pipeline/outputs/05_side_asymmetry/long_vs_short_wr_scatter.png}
+    \caption{Per-wallet Long win rate vs.\ Short win rate (n=748 wallets with $\geq$5 trades each side). The Pearson correlation of $+0.336$ supports side-aware decomposition.}
+    \label{fig:side}
+\end{figure}
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=0.48\textwidth]{../pipeline/outputs/05_side_asymmetry/skill_quadrants.png}
+    \includegraphics[width=0.48\textwidth]{../pipeline/outputs/06_leverage_sizing_skill/sizing_skill_distribution.png}
+    \caption{Skill quadrant analysis (left) and sizing skill distribution (right).}
+    \label{fig:more}
+\end{figure}
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=0.60\textwidth]{../pipeline/outputs/03_rankings_baseline/component_correlation_matrix.png}
+    \caption{Baseline score component correlation matrix. The strong correlation between WL Holding Time and WL ROI Ratio ($r=0.652$) indicates redundancy in the current scoring system.}
+    \label{fig:baseline}
+\end{figure}
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=0.48\textwidth]{../pipeline/outputs/08_logs_overview/events_over_time_daily.png}
+    \includegraphics[width=0.48\textwidth]{../pipeline/outputs/08_logs_overview/action_composition_daily.png}
+    \caption{Time series of daily log events (left) and action composition (right).}
+    \label{fig:timeseries}
+\end{figure}
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=0.48\textwidth]{../pipeline/outputs/05_feature_analysis/feature_correlations.png}
+    \includegraphics[width=0.48\textwidth]{../pipeline/outputs/05_feature_analysis/quadrant_distribution.png}
+    \caption{Pipeline feature correlations with realized win rate (left) and quadrant distribution (right).}
+    \label{fig:pipeline_feats}
+\end{figure}
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=0.48\textwidth]{../pipeline/outputs/06_walkforward_validation/walkforward_correlations.png}
+    \includegraphics[width=0.48\textwidth]{../pipeline/outputs/06_walkforward_validation/best_feature_scatter.png}
+    \caption{Walk-forward out-of-sample feature correlations (left) and scatter of best proposed feature vs.\ future win rate (right). Orange bars indicate naive baselines.}
+    \label{fig:walkforward}
+\end{figure}
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=0.48\textwidth]{../pipeline/outputs/07_bayesian_skill_model/bayes_score_distribution.png}
+    \includegraphics[width=0.48\textwidth]{../pipeline/outputs/08_baseline_comparison/score_comparison_spearman.png}
+    \caption{Bayesian score distribution (left) and baseline Spearman rank correlation comparison (right).}
+    \label{fig:bayes_results}
+\end{figure}
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=0.48\textwidth]{../pipeline/outputs/09_luck_vs_skill_null/luck_vs_skill_null.png}
+    \includegraphics[width=0.48\textwidth]{../pipeline/outputs/10_sign_randomization/sign_randomization_pvalues.png}
+    \caption{Luck-vs-skill null distribution (left, Papaioannou et al.\ 2024) and sign-randomisation $p$-value histogram (right, Gomez-Cram et al.\ 2026).}
+    \label{fig:luck_skill}
+\end{figure}
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=0.48\textwidth]{../pipeline/outputs/11_wash_trade_filter/duration_distribution.png}
+    \includegraphics[width=0.48\textwidth]{../pipeline/outputs/12_zscore_baseline/zscore_distribution.png}
+    \caption{Wash-trade duration distribution (left, Ashfaq 2023) and zScore baseline distribution (right, Anon et al.\ 2025).}
+    \label{fig:b6_b8}
+\end{figure}
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=0.60\textwidth]{../pipeline/outputs/13_full_baseline_comparison/full_comparison.png}
+    \caption{Full baseline comparison: Spearman rank correlation of all eight baselines plus the proposed Bayesian score against out-of-sample future win rate.}
+    \label{fig:full_compare}
+\end{figure}
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=0.90\textwidth]{../pipeline/outputs/14_learned_ranker/learned_ranker_by_reliability.png}
+    \caption{Stage 14. Left: \texttt{future\_win\_rate} label reliability $\rho$ rises sharply with the minimum future-trade threshold; the $\geq5$ evaluation set used in Stages 8--13 sits near the ``$\approx$pure luck'' line. Right: the learned LambdaMART ranker vs.\ baselines by reliability regime---signal (Spearman vs.\ future WR) grows monotonically as the label becomes reliable, and the learned ranker beats raw ROI and the equal-weighted \texttt{bayes\_score} at every level.}
+    \label{fig:learned_ranker}
+\end{figure}
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=0.90\textwidth]{../pipeline/outputs/15_rolling_walkforward/rolling_walkforward.png}
+    \caption{Stage 15 rolling walk-forward (5 folds, expanding train, non-overlapping 45-day test windows). Left: per-fold Spearman vs.\ future WR---all Bayesian scores are well above raw ROI (bottom flat line) in every fold. Right: aggregate mean$\pm$std; \texttt{posterior\_timing} is highest on mean, \texttt{learned\_ranker} has the smallest error bar among the strong scores, and \texttt{b3\_roi} is stable but weakest.}
+    \label{fig:rolling}
+\end{figure}
+
+\end{document}

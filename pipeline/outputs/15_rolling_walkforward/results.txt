@@ -1,0 +1,25 @@
+╔══════════════════════════════════════════════════════════════════╗
+║  ROLLING WALK-FORWARD VALIDATION                                 ║
+╚══════════════════════════════════════════════════════════════════╝
+  5 folds, expanding train, non-overlapping 45-day test windows
+  Eval population: wallets with >= 10 future trades per fold
+
+  Fold 0 (n= 238, rho=0.320): learned_ranker=+0.290  posterior_liquidation=+0.422  posterior_timing=+0.273  posterior_sell=+0.253  bayes_score=+0.210  b3_roi=+0.172
+  Fold 1 (n= 121, rho=0.604): learned_ranker=+0.383  posterior_liquidation=+0.290  posterior_timing=+0.525  posterior_sell=+0.559  bayes_score=+0.465  b3_roi=+0.170
+  Fold 2 (n= 143, rho=0.552): learned_ranker=+0.473  posterior_liquidation=+0.349  posterior_timing=+0.522  posterior_sell=+0.449  bayes_score=+0.463  b3_roi=+0.183
+  Fold 3 (n= 191, rho=0.606): learned_ranker=+0.512  posterior_liquidation=+0.359  posterior_timing=+0.578  posterior_sell=+0.490  bayes_score=+0.448  b3_roi=+0.174
+  Fold 4 (n= 177, rho=0.673): learned_ranker=+0.426  posterior_liquidation=+0.300  posterior_timing=+0.522  posterior_sell=+0.367  bayes_score=+0.386  b3_roi=+0.166
+
+╔══════════════════════════════════════════════════════════════════╗
+║  AGGREGATE ACROSS 5 FOLDS  (Spearman vs future WR, mean +/- std) ║
+╚══════════════════════════════════════════════════════════════════╝
+  learned_ranker           +0.417 ± 0.077
+  posterior_liquidation    +0.344 ± 0.048
+  posterior_timing         +0.484 ± 0.108
+  posterior_sell           +0.424 ± 0.106
+  bayes_score              +0.395 ± 0.097
+  b3_roi                   +0.173 ± 0.006
+
+  Mean label reliability across folds: rho=0.551
+
+  Saved per-fold results -> data/processed/rolling_walkforward.parquet

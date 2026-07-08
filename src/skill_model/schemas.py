@@ -7,12 +7,15 @@ class SkillDimension(str, Enum):
     """Skill dimensions decomposed from the single baseline composite score.
 
     Maps to research-proposal.md §3.1: buy = Lim et al. (2022) entry skill,
-    sell = Lim et al. (2022) exit skill, timing = Van Loon (2018) hit ratio.
+    sell = Lim et al. (2022) exit skill, timing = Van Loon (2018) hit ratio,
+    sizing = Van Loon (2018) win/loss ratio, liquidation = avoidance rate.
     """
 
     BUY = "buy"
     SELL = "sell"
     TIMING = "timing"
+    SIZING = "sizing"
+    LIQUIDATION = "liquidation"
 
 
 class DimensionHyperparameters(BaseModel):

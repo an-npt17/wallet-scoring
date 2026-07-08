@@ -18,7 +18,7 @@
 ╚════════════════════════════════════════════════════════════════╝
   Real top-decile mean FUTURE win rate (out-of-sample): 0.5010
   Null (chance-trader) top-decile mean TRAIN win rate:
-    mean=0.7276  std=0.0108
+    mean=0.7274  std=0.0108
   Real out-of-sample value falls at the 0.0th percentile of the null.
   -> Cannot reject the null that top-decile performance is explainable by chance.
 

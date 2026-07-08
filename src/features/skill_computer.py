@@ -14,11 +14,22 @@ import polars as pl
 
 
 class SkillComputerService:
+    # ROI winsorization bounds (fraction, not %). Perp ROI is |return| × leverage,
+    # so legitimately large; but rows with entry_collateral_usd <= 0 produce
+    # |roi| up to 1e14, poisoning every mean-based feature (avg_roi, sizing
+    # log(W/L), leverage_adj_roi). We drop those rows and winsorize the residual
+    # heavy tail to robust quantiles before any aggregation.
+    _ROI_CLIP_LOW_Q: float = 0.001
+    _ROI_CLIP_HIGH_Q: float = 0.999
+
     def compute(self, positions: pl.DataFrame) -> pl.DataFrame:
+        positions = self._clean_positions(positions)
         base = self._base_aggregation(positions)
         sizing = self._sizing_skill(positions)
+        wl = self._van_loon_wl_ratio(positions)
         return (
             base.join(sizing, on="wallet", how="left")
+            .join(wl, on="wallet", how="left")
             .with_columns(
                 [
                     (pl.col("long_win_rate") - pl.col("short_win_rate")).alias(
@@ -50,6 +61,23 @@ class SkillComputerService:
                     ).alias("liquidation_rate"),
                 ]
             )
+        )
+
+    def _clean_positions(self, df: pl.DataFrame) -> pl.DataFrame:
+        """Drop degenerate-collateral rows and winsorize the ROI heavy tail.
+
+        Rows with entry_collateral_usd <= 0 yield |roi| up to ~1e14 and must be
+        removed before any mean-based aggregation. The remaining ROI tail is
+        winsorized to robust quantiles so that a single fat-tailed trade cannot
+        dominate a wallet's mean win/loss ROI (Van Loon sizing ratio).
+        """
+        cleaned = df.filter(pl.col("entry_collateral_usd") > 0)
+        low = cleaned["roi"].quantile(self._ROI_CLIP_LOW_Q)
+        high = cleaned["roi"].quantile(self._ROI_CLIP_HIGH_Q)
+        if low is None or high is None:
+            return cleaned
+        return cleaned.with_columns(
+            pl.col("roi").clip(lower_bound=low, upper_bound=high).alias("roi")
         )
 
     def _base_aggregation(self, df: pl.DataFrame) -> pl.DataFrame:
@@ -109,6 +137,64 @@ class SkillComputerService:
                 # Metadata
                 pl.col("platform").first().alias("platform"),
                 pl.col("chain").first().alias("chain"),
+            ]
+        )
+
+    def _van_loon_wl_ratio(self, df: pl.DataFrame) -> pl.DataFrame:
+        """Van Loon (2018) win/loss ratio with delta-method sampling variance.
+
+        Returns wallet-level log(W/L) estimate and sigma2 for the
+        Normal-Normal shrinkage model.
+        """
+        _EPS = 1e-8
+        grouped = df.group_by("wallet").agg(
+            [
+                pl.col("roi").filter(pl.col("win")).mean().alias("mean_win_roi"),
+                pl.col("roi").filter(pl.col("win")).count().alias("n_win"),
+                pl.col("roi")
+                .filter(pl.col("win"))
+                .var(ddof=1)
+                .fill_null(0.0)
+                .alias("var_win_roi"),
+                pl.col("roi")
+                .filter(~pl.col("win"))
+                .abs()
+                .mean()
+                .alias("mean_loss_roi"),
+                pl.col("roi").filter(~pl.col("win")).count().alias("n_loss"),
+                pl.col("roi")
+                .filter(~pl.col("win"))
+                .abs()
+                .var(ddof=1)
+                .fill_null(0.0)
+                .alias("var_loss_roi"),
+            ]
+        )
+        return grouped.with_columns(
+            [
+                pl.when(
+                    (pl.col("mean_loss_roi") > _EPS)
+                    & (pl.col("mean_win_roi") > 0)
+                )
+                .then((pl.col("mean_win_roi") / pl.col("mean_loss_roi")).log())
+                .otherwise(None)
+                .alias("log_wl_ratio"),
+                # delta-method sampling variance of log(W/L):
+                # var(log(WL)) ≈ var_win / (n_win * μ_win²) + var_loss / (n_loss * μ_loss²)
+                pl.when(
+                    (pl.col("mean_loss_roi") > _EPS)
+                    & (pl.col("mean_win_roi") > 0)
+                    & (pl.col("n_win") > 1)
+                    & (pl.col("n_loss") > 1)
+                )
+                .then(
+                    pl.col("var_win_roi")
+                    / (pl.col("n_win") * pl.col("mean_win_roi").pow(2) + _EPS)
+                    + pl.col("var_loss_roi")
+                    / (pl.col("n_loss") * pl.col("mean_loss_roi").pow(2) + _EPS)
+                )
+                .otherwise(None)
+                .alias("sigma2_log_wl"),
             ]
         )
 

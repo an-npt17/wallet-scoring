@@ -1,37 +1,43 @@
 ╔════════════════════════════════════════════════════════════════╗
 ║  B1-B5 BASELINE COMPARISON (out-of-sample, RQ4)                ║
 ╚════════════════════════════════════════════════════════════════╝
-  Wallets with future labels: 1,348
+  Wallets with future labels: 1,347
 
 ╔════════════════════════════════════════════════════════════════╗
 ║  SPEARMAN RANK CORRELATION vs FUTURE PERFORMANCE               ║
 ╚════════════════════════════════════════════════════════════════╝
   Score                  vs future_WR  vs future_PnL  Note
   ----------------------------------------------------------------------
-  bayes_score                  +0.109         +0.033  
+  van_loon_score               +0.071         +0.023  
+  bayes_score                  +0.054         +0.007  
   posterior_buy                +0.084         +0.040  
   posterior_sell               +0.145         +0.027  
-  posterior_timing             +0.134         +0.060  
+  posterior_timing             +0.133         +0.059  
+  posterior_sizing             -0.062         -0.017  
+  posterior_liquidation         +0.227         +0.094  
   b1_composite                   +nan           +nan  only top-20 wallets/snapshot have coverage
   b2_pnl                       +0.106         +0.030  
-  b3_roi                       +0.142         +0.051  
+  b3_roi                       +0.141         +0.051  
   b4_win_rate                  +0.072         -0.029  
-  b5_sharpe                    +0.075         -0.022  
+  b5_sharpe                    +0.074         -0.022  
 
 ╔════════════════════════════════════════════════════════════════╗
 ║  TOP-DECILE HIT RATE (% above population median future_WR)     ║
 ╚════════════════════════════════════════════════════════════════╝
   Score                  Hit rate    N wallets
   ----------------------------------------------
-  bayes_score              46.7%        1,348
+  van_loon_score           41.0%        1,212
+  bayes_score              41.2%        1,347
   posterior_buy            41.0%          956
   posterior_sell           45.9%          674
-  posterior_timing         46.9%        1,348
+  posterior_timing         46.9%        1,347
+  posterior_sizing         36.1%        1,212
+  posterior_liquidation     44.9%        1,347
   b1_composite              nan%            0
-  b2_pnl                   47.8%        1,348
-  b3_roi                   52.2%        1,348
-  b4_win_rate              40.4%        1,348
-  b5_sharpe                37.5%        1,188
+  b2_pnl                   47.8%        1,347
+  b3_roi                   52.2%        1,347
+  b4_win_rate              40.4%        1,347
+  b5_sharpe                37.5%        1,187
 
   B6 (zScore, arXiv:2507.20494) — NOT implemented, excluded from this comparison.
   B2-B5 use full account history; bayes_score/posterior_* use train-window only

@@ -42,6 +42,7 @@ SIGN_RANDOMIZATION_PATH = PROCESSED_DIR / "sign_randomization_scores.parquet"
 WASH_TRADE_FLAGS_PATH = PROCESSED_DIR / "wash_trade_flags.parquet"
 
 _SCORE_COLS = [
+    "van_loon_score",
     "bayes_score",
     "b1_composite",
     "b2_pnl",
@@ -110,7 +111,7 @@ def _run(out_dir: Path) -> None:
     with tqdm(total=5, desc="Stage 13", unit="step", dynamic_ncols=True) as pbar:
         pbar.set_postfix_str("loading all score parquets")
         bayes = pl.read_parquet(BAYES_SCORES_PATH).select(
-            ["wallet", "bayes_score", "future_win_rate", "future_pnl"]
+            ["wallet", "bayes_score", "van_loon_score", "future_win_rate", "future_pnl"]
         )
         pbar.update()
         baselines = pl.read_parquet(BASELINES_PATH).select(

@@ -5,7 +5,8 @@
 
   Score             Spearman WR  Spearman PnL   Hit rate  Note
   --------------------------------------------------------------------------
-  bayes_score            +0.109        +0.033     46.7%  
+  van_loon_score         +0.068        +0.022     40.7%  
+  bayes_score            +0.058        +0.011     42.6%  
   b1_composite             +nan          +nan      nan%  only top-20 wallets/snapshot have coverage
   b2_pnl                 +0.106        +0.030     47.8%  
   b3_roi                 +0.142        +0.051     52.2%  
@@ -23,7 +24,8 @@
 
   Score             Spearman WR  Spearman PnL   Hit rate  Note
   --------------------------------------------------------------------------
-  bayes_score            +0.090        +0.034     45.9%  
+  van_loon_score         +0.093        +0.023     42.9%  
+  bayes_score            +0.045        +0.011     42.1%  
   b1_composite             +nan          +nan      nan%  only top-20 wallets/snapshot have coverage
   b2_pnl                 +0.107        +0.030     47.4%  
   b3_roi                 +0.146        +0.052     54.1%  

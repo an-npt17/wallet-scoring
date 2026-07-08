@@ -43,10 +43,15 @@ from src.skill_model import EmpiricalBayesSkillService, SkillDimension
 
 _MIN_TEST_TRADES = 5
 
-_DIMENSIONS: list[tuple[SkillDimension, str, str]] = [
+_RATE_DIMENSIONS: list[tuple[SkillDimension, str, str]] = [
     (SkillDimension.BUY, "long_win_rate", "n_long_trades"),
     (SkillDimension.SELL, "short_win_rate", "n_short_trades"),
     (SkillDimension.TIMING, "overall_win_rate", "n_trades"),
+    (SkillDimension.LIQUIDATION, "survival_rate", "n_trades"),
+]
+
+_CONTINUOUS_DIMENSIONS: list[tuple[SkillDimension, str, str, str]] = [
+    (SkillDimension.SIZING, "log_wl_ratio", "sigma2_log_wl", "n_trades"),
 ]
 
 
@@ -99,13 +104,15 @@ def _run(out_dir: Path, holdout_days: int) -> None:
         pbar.set_postfix_str("computing train-window raw skill estimates")
         features = SkillComputerService().compute(train).filter(
             pl.col("n_trades") >= MIN_TRADES_FILTER
+        ).with_columns(
+            (1.0 - pl.col("liquidation_rate")).alias("survival_rate")
         )
         pbar.update()
 
-        pbar.set_postfix_str("fitting empirical-Bayes hierarchical model per dimension")
+        pbar.set_postfix_str("fitting empirical-Bayes rate dimensions")
         service = EmpiricalBayesSkillService()
         posteriors: dict[str, pl.DataFrame] = {}
-        for dimension, rate_col, n_col in _DIMENSIONS:
+        for dimension, rate_col, n_col in _RATE_DIMENSIONS:
             posterior, hyper = service.fit_rate_dimension(
                 features,
                 dimension=dimension,
@@ -121,20 +128,42 @@ def _run(out_dir: Path, holdout_days: int) -> None:
             print(f"  tau2 (between-wallet variance): {hyper.tau2:>10.6f}")
             print(f"  Mean shrinkage toward prior:    {hyper.mean_shrinkage:>10.4f}")
             print()
+
+        pbar.set_postfix_str("fitting empirical-Bayes continuous dimensions (sizing)")
+        for dimension, estimate_col, sigma2_col, n_col in _CONTINUOUS_DIMENSIONS:
+            posterior, hyper = service.fit_continuous_dimension(
+                features,
+                dimension=dimension,
+                wallet_col="wallet",
+                estimate_col=estimate_col,
+                sigma2_col=sigma2_col,
+                n_col=n_col,
+                min_trades=MIN_TRADES_FILTER,
+            )
+            posteriors[dimension.value] = posterior
+            _print_box(f"DIMENSION: {dimension.value.upper()} ({estimate_col})")
+            print(f"  N wallets:        {hyper.n_wallets:>10,}")
+            print(f"  mu (population):  {hyper.mu:>10.4f}")
+            print(f"  tau2 (between-wallet variance): {hyper.tau2:>10.6f}")
+            print(f"  Mean shrinkage toward prior:    {hyper.mean_shrinkage:>10.4f}")
+            print()
         pbar.update()
 
-    # ── Combine per-dimension posteriors into one score ──────────────────────
-    # raw_estimate/n_trades per dimension are kept (not just posterior_mean) so
-    # downstream null-hypothesis tests (stage 09/10) can reuse them without
-    # recomputing SkillComputerService on the same train window.
+    # ── Combine per-dimension posteriors ────────────────────────────────────
+    # raw_estimate/n_trades per dimension are kept for downstream null-hypothesis
+    # tests (stage 09/10).
+    _ALL_DIM_KEYS = [
+        d.value for d in
+        [t[0] for t in _RATE_DIMENSIONS] + [t[0] for t in _CONTINUOUS_DIMENSIONS]
+    ]
     combined = None
-    for dim, _, _ in _DIMENSIONS:
-        p = posteriors[dim.value].select(
+    for dim_key in _ALL_DIM_KEYS:
+        p = posteriors[dim_key].select(
             [
                 "wallet",
-                pl.col("posterior_mean").alias(f"posterior_{dim.value}"),
-                pl.col("raw_estimate").alias(f"raw_{dim.value}"),
-                pl.col("n_trades").alias(f"n_trades_{dim.value}"),
+                pl.col("posterior_mean").alias(f"posterior_{dim_key}"),
+                pl.col("raw_estimate").alias(f"raw_{dim_key}"),
+                pl.col("n_trades").alias(f"n_trades_{dim_key}"),
             ]
         )
         combined = (
@@ -142,23 +171,40 @@ def _run(out_dir: Path, holdout_days: int) -> None:
         )
     assert combined is not None
 
+    # ── Multi-dimensional z-score average (original bayes_score) ────────────
+    _SKILL_DIM_KEYS = ["buy", "sell", "timing", "sizing"]
     z_exprs = []
-    for dim, _, _ in _DIMENSIONS:
-        col = f"posterior_{dim.value}"
+    for key in _SKILL_DIM_KEYS:
+        col = f"posterior_{key}"
+        if col not in combined.columns:
+            continue
         mean_v = combined[col].mean()
         std_v = combined[col].std()
         if mean_v is None or std_v is None or std_v == 0:
             continue
-        z_exprs.append(((pl.col(col) - mean_v) / std_v).alias(f"z_{dim.value}"))
+        z_exprs.append(((pl.col(col) - mean_v) / std_v).alias(f"z_{key}"))
     combined = combined.with_columns(z_exprs)
-    z_cols = [f"z_{dim.value}" for dim, _, _ in _DIMENSIONS if f"z_{dim.value}" in combined.columns]
-    combined = combined.with_columns(pl.mean_horizontal(z_cols).alias("bayes_score"))
+    z_avail = [f"z_{k}" for k in _SKILL_DIM_KEYS if f"z_{k}" in combined.columns]
+    combined = combined.with_columns(pl.mean_horizontal(z_avail).alias("bayes_score"))
+
+    # ── Van Loon (2018) multiplicative score ────────────────────────────────
+    # score = posterior_timing × exp(posterior_sizing) × sqrt(n_trades)
+    #         − (1 − posterior_liquidation)   ← shrunk liquidation-rate penalty
+    _EPS = 1e-8
+    combined = combined.with_columns(
+        (
+            pl.col("posterior_timing")
+            * pl.col("posterior_sizing").exp()
+            * pl.col("n_trades_timing").sqrt()
+            - (1.0 - pl.col("posterior_liquidation"))
+        ).alias("van_loon_score")
+    )
 
     future = _future_labels(test)
     combined = combined.join(future, on="wallet", how="inner")
     combined.write_parquet(BAYES_SCORES_PATH)
 
-    _print_box("COMBINED bayes_score (equal-weighted z-scores)")
+    _print_box("COMBINED bayes_score (equal-weighted z-scores of buy/sell/timing/sizing)")
     print(f"  Wallets with combined score + future labels: {len(combined):,}")
     print(f"  Saved -> {BAYES_SCORES_PATH}")
     print()
@@ -166,7 +212,7 @@ def _run(out_dir: Path, holdout_days: int) -> None:
     fig, ax = plt.subplots(figsize=(8, 4))
     ax.hist(combined["bayes_score"].drop_nulls(), bins=50)
     ax.set_title("Combined Bayesian skill score distribution")
-    ax.set_xlabel("bayes_score (mean z-score across buy/sell/timing)")
+    ax.set_xlabel("bayes_score (mean z-score across buy/sell/timing/sizing)")
     ax.set_ylabel("n wallets")
     save_fig(fig, out_dir, "bayes_score_distribution.png")
 

@@ -126,6 +126,20 @@ Perpetual DEX research (Chen et al., 2024; Chitra, 2026) documents that traders 
 
 ______________________________________________________________________
 
+## 7b. Reproducibility Audit — New Baselines Identified
+
+A follow-up search (2026-07) targeted specifically for methods reproducible on *our* data (perp position event logs — no follower graph, no order-book visibility, no text/sentiment) surfaced two additional candidates not previously in this review:
+
+**B7 — Sign-randomization skill classifier (Gomez-Cram et al., 2026, synthesized in Nechepurenko 2026 [2605.02287]).** Classifies wallets as "skilled winners" via permutation-test persistence of directional accuracy (3.14% of Polymarket accounts flagged). Confirmed via direct search: **the original account-level classifications, the 1,950-account insider list, and the sign-randomization source code have not been released.** This means reproducing it requires implementing the method from the paper's description rather than forking code — but it is fully reproducible on our data, since it only needs a wallet's sequence of directionally-correct/incorrect trades (which our `positions.parquet` already has via the `win` column). No new data needed.
+
+**B8 — Wash-trade / bot detection heuristic (Ashfaq 2023 [2305.01543]).** Graph-based heuristic flagging repeated buy-sell cycles between colluding wallets in NFT markets (0.14% of transactions flagged as wash-traded in the original study). **A public unofficial reference implementation exists** (github.com/Dreamerryao/nft-wash-trading). The core heuristic — rapid same-wallet open-close cycles, same-asset same-timestamp counterparties — maps directly onto our `positionKey`/Open-Close event structure. Directly relevant to Gao et al. (2026)'s manipulation-robustness concern (§5.2) and to the data-quality flags already surfaced in `docs/eda-report.tex` (0.2% of positions have <1h duration). Proposed use: a pre-filter that flags likely bot/wash-trade wallets *before* they are scored, rather than a ranking baseline to beat.
+
+**Supporting public dataset:** Polymarket-v1 (Time Seventeen, 2026 [2606.04217]) — 1.2B trade records, CC-BY-4.0, on Hugging Face, 100% ground-truth aggressor direction. Since Gomez-Cram et al.'s own code/labels are unreleased, this dataset lets us independently validate our reproduction of B7's sign-randomization test on prediction-market data (a second domain) before trusting the same implementation on our perp data — a cross-domain sanity check, not required but cheap given the data is already public and downloadable.
+
+**Not reproducible, still blocked** (unchanged from §7): Barone & Lillo's adverse-selection metric (needs order-visibility flags, absent from our event log), Liu et al.'s social-trading network effects (needs follower graph), Gao et al.'s LLM bot detector (needs text/sentiment).
+
+______________________________________________________________________
+
 ## 8. Conclusion
 
 The literature converges on four conclusions relevant to elite wallet scoring:
@@ -173,3 +187,5 @@ See `references.bib` for full BibTeX entries.
 | [PerpDEXBehavior2024] | Chen, Ma & Nie (2024). How DEX Designs Shape Traders' Behavior on Perpetual Futures. arXiv:2402.03953 |
 | [HyperliquidAdverse2026] | Barone & Lillo (2026). Trading in the Sunshine or in the Shade: Market Impact and Adverse Selection on Hyperliquid. arXiv:2606.15715 |
 | [AutodeleveragingADL2026] | Chitra (2026). Autodeleveraging: Impossibilities and Optimization. arXiv:2512.01112 |
+| [PolymarketV1_2026] | Time Seventeen (2026). Polymarket-v1 Database. arXiv:2606.04217. Dataset: huggingface.co/datasets/TimeSeventeen/Polymarket-v1 |
+| [NFTWashDetect2023] | Ashfaq (2023). NFT Wash Trading Detection. arXiv:2305.01543. Code: github.com/Dreamerryao/nft-wash-trading |

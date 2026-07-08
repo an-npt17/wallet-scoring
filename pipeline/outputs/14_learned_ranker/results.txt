@@ -1,0 +1,33 @@
+╔══════════════════════════════════════════════════════════════════╗
+║  LEARNED RANKER (LambdaMART) — RELIABILITY-AWARE EVALUATION      ║
+╚══════════════════════════════════════════════════════════════════╝
+  Wallets with posteriors + future labels: 1,230
+  Features: posterior_buy, posterior_sell, posterior_timing, posterior_sizing, posterior_liquidation, raw_sizing, n_trades_timing
+  5-fold CV, NDCG@10%, seed=42
+
+╔══════════════════════════════════════════════════════════════════╗
+║  MIN 5 FUTURE TRADES  (n=488, label reliability rho=0.146)       ║
+╚══════════════════════════════════════════════════════════════════╝
+  learned_ranker   Spearman(OOS)=+0.205   CV Spearman=+0.213±0.131   NDCG@48=0.527±0.065
+  b3_roi                 Spearman=+0.150   (full-history baseline)
+  posterior_liquidation  Spearman=+0.305
+  bayes_score            Spearman=+0.132   (equal-weight composite)
+
+╔══════════════════════════════════════════════════════════════════╗
+║  MIN 10 FUTURE TRADES  (n=238, label reliability rho=0.320)      ║
+╚══════════════════════════════════════════════════════════════════╝
+  learned_ranker   Spearman(OOS)=+0.304   CV Spearman=+0.308±0.105   NDCG@23=0.576±0.067
+  b3_roi                 Spearman=+0.172   (full-history baseline)
+  posterior_liquidation  Spearman=+0.422
+  bayes_score            Spearman=+0.210   (equal-weight composite)
+
+╔══════════════════════════════════════════════════════════════════╗
+║  MIN 20 FUTURE TRADES  (n=70, label reliability rho=0.651)       ║
+╚══════════════════════════════════════════════════════════════════╝
+  learned_ranker   Spearman(OOS)=+0.385   CV Spearman=+0.346±0.293   NDCG@7=0.749±0.105
+  b3_roi                 Spearman=+0.166   (full-history baseline)
+  posterior_liquidation  Spearman=+0.394
+  bayes_score            Spearman=+0.386   (equal-weight composite)
+
+  Saved OOS ranker scores (>= 5 pop) -> data/processed/learned_ranker_scores.parquet
+
