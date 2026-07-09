@@ -67,7 +67,7 @@ class HawkesBaselineService:
 
     def __init__(self, seconds_scale: float = 300.0) -> None:
         # Scale time to bin units for numerical conditioning of beta.
-        self._scale = seconds_scale
+        self._scale: float = seconds_scale
 
     def _nll(
         self,
@@ -79,6 +79,17 @@ class HawkesBaselineService:
         span: float,
         use_market: bool,
     ) -> float:
+        """
+        Function to minimize for MLE of Hawkes params (log-likelihood).
+        Args:
+            theta: Log-transformed parameters [log(mu), log(alpha_self), log(alpha_market), log(beta)].
+            a_self: Self-excitation terms for each event.
+            a_mkt: Market-excitation terms for each event (if use_market is True).
+            comp_self: Compensator terms for self-excitation.
+            comp_mkt: Compensator terms for market-excitation (if use_market is True).
+            span: Time span of the observation window.
+            use_market: Whether to include market excitation in the likelihood.
+        """
         mu = np.exp(theta[0])
         alpha_s = np.exp(theta[1])
         alpha_m = np.exp(theta[2]) if use_market else 0.0

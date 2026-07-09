@@ -16,6 +16,34 @@
 \usepackage{amsmath,amssymb}
 \usepackage{setspace}
 \usepackage{parskip}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,shapes.geometric,fit,backgrounds,calc}
+\usepackage[numbers,sort&compress]{natbib}
+
+%% ── diagram palette & node styles ─────────────────────────────────
+\definecolor{cData}{HTML}{2C6E9B}   % data / raw sources
+\definecolor{cProc}{HTML}{3F8A5B}   % processing / features
+\definecolor{cBase}{HTML}{B0642A}   % intensity-only baselines
+\definecolor{cCov}{HTML}{7A3E9D}    % covariate-using models (this work)
+\definecolor{cEval}{HTML}{555555}   % evaluation
+\definecolor{cPass}{HTML}{2E8B57}   % gate: pass
+\definecolor{cFail}{HTML}{B03A2E}   % gate: reject
+
+\tikzset{
+  box/.style={rounded corners=2pt, draw=#1, line width=0.9pt, fill=#1!8,
+              text=black, align=center, font=\small, inner sep=5pt,
+              minimum height=8mm},
+  data/.style={box=cData},
+  proc/.style={box=cProc},
+  base/.style={box=cBase},
+  cov/.style={box=cCov},
+  eval/.style={box=cEval},
+  gate/.style={diamond, aspect=2, draw=cEval, line width=0.9pt, fill=cEval!8,
+               align=center, font=\small, inner sep=2pt},
+  flow/.style={-{Stealth[length=2.4mm]}, line width=0.8pt, draw=cEval},
+  flowd/.style={flow, dashed},
+  lbl/.style={font=\scriptsize\itshape, text=cEval},
+}
 
 %% ── metadata ──────────────────────────────────────────────────────
 \title{\textbf{EDA \& Initial Results}\\%
@@ -33,6 +61,7 @@ This report develops and de-risks a new thesis direction on the \texttt{perpetua
 
 %% ===================================================================
 \section{Problem Formulation}
+\label{sec:formulation}
 %% ===================================================================
 
 \subsection{Why Forecast Liquidation Bursts}
@@ -55,7 +84,26 @@ We model the conditional intensity of liquidation events for asset $a$ (and, in 
 \lambda_k(t) \;=\; \underbrace{\mu_k\!\big(x_k(t)\big)}_{\text{crowding-modulated baseline}} \;+\; \sum_{k'}\sum_{t_j < t} \alpha_{k'\to k}\,\phi(t - t_j),
 \label{eq:intensity}
 \end{equation}
-where $\phi$ is an exponential triggering kernel, $\alpha_{k'\to k}$ is a cross-mark excitation matrix (cross-tier, cross-venue contagion), and $x_k(t)$ is a vector of \emph{tier-aware crowding} covariates. The second term is the classical Hawkes self-excitation of Bacry et al.\ (2015); the novel component is the crowding-modulated baseline $\mu_k(\cdot)$. The central hypothesis of the thesis is that $x_k(t)$ carries information about \emph{future} bursts beyond what the recent event history alone provides.
+where $\phi$ is an exponential triggering kernel, $\alpha_{k'\to k}$ is a cross-mark excitation matrix (cross-tier, cross-venue contagion), and $x_k(t)$ is a vector of \emph{tier-aware crowding} covariates. The second term is the classical Hawkes self-excitation of Bacry et al.\ (2015); the novel component is the crowding-modulated baseline $\mu_k(\cdot)$. The central hypothesis of the thesis is that $x_k(t)$ carries information about \emph{future} bursts beyond what the recent event history alone provides. Figure~\ref{fig:intensity} maps each modelling family onto the two terms of Eq.~\eqref{eq:intensity}.
+
+%% ── Fig: intensity decomposition ─────────────────────────────────
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[node distance=6mm and 10mm]
+  \node[cov] (mu) {\textbf{Crowding baseline} $\mu_k(x_k(t))$\\\scriptsize tier imbalance, concentration,\\\scriptsize leverage, cross-asset spillover};
+  \node[base, right=24mm of mu] (self) {\textbf{Self-excitation}\\$\sum_{k'}\sum_{t_j<t}\alpha_{k'\to k}\,\phi(t-t_j)$\\\scriptsize exponential kernel over past events};
+  \node[eval, below=12mm of $(mu)!0.5!(self)$] (lam) {$\lambda_k(t)$\\\scriptsize conditional burst intensity};
+
+  \draw[flow, draw=cCov] (mu) -- (lam);
+  \draw[flow, draw=cBase] (self) -- (lam);
+
+  % which model touches which term
+  \node[lbl, below=1mm of self, text=cBase] {Hawkes / THP capture \emph{this} term only};
+  \node[lbl, below=1mm of mu, text=cCov] {CovTPP / ST-GNN / LGBM add \emph{this} term};
+\end{tikzpicture}
+\caption{Decomposition of the burst intensity, Eq.~\eqref{eq:intensity}. The published baselines model only the self-exciting term (right); this work's covariate models supply the crowding-modulated baseline (left). The thesis measures the \emph{lift} from adding the left term, isolated most cleanly within the neural-TPP family (THP $\to$ CovTPP).}
+\label{fig:intensity}
+\end{figure}
 
 \subsection{The Crowding Hypothesis}
 
@@ -64,6 +112,154 @@ Crowding thins a market's ``error bars'': when positioning is concentrated and o
 \subsection{The Evaluation Problem (and the Contrast with Wallet Skill)}
 
 A prior formulation on the same database---side-aware wallet skill scoring---failed for a measurement reason: its evaluation label (future win rate over few trades) was $\approx99\%$ binomial sampling noise, so no method could demonstrably beat simple baselines. The present formulation is deliberately chosen to avoid that trap. The burst label Eq.~\eqref{eq:burst} is an \emph{event count} over a dense stream (190\,573 liquidations), not a noisy per-wallet rate. Section~\ref{sec:m0burst} shows it is strongly learnable. The consequence is that the modelling target is not ``can bursts be predicted'' (they can, almost trivially, from temporal autocorrelation) but \emph{by how much crowding features improve prediction over the self-exciting baseline}---a well-posed, measurable question.
+
+\subsection{Contributions}
+
+In one sentence: \emph{crowding covariates, injected into the intensity baseline of a self-exciting process, roughly double PR-AUC over intensity-only point-process baselines on a leakage-safe, out-of-sample liquidation-burst forecast.} Concretely:
+
+\begin{itemize}[nosep]
+    \item \textbf{(C1)} A leakage-safe, tier-aware crowding panel and burst label built from 40.5M raw on-chain events (4.24M asset-bin rows, 40 assets; \S\ref{sec:system}--\S\ref{sec:m0burst}), with two feasibility probes run \emph{before} modelling to de-risk the direction.
+    \item \textbf{(C2)} A covariate-conditioned neural point process (CovTPP) that realizes the crowding-modulated baseline $\mu_k(\cdot)$ of Eq.~\eqref{eq:intensity}, isolating the covariate effect \emph{within} the neural-TPP family against a Transformer Hawkes Process baseline.
+    \item \textbf{(C3)} Explicit cross-asset spillover features and a spatio-temporal GNN over a positioning graph, benchmarked against a market-augmented multivariate Hawkes process.
+    \item \textbf{(C4)} A precision-recall-first evaluation on identical out-of-sample test bins across six named models (\S\ref{sec:results}), exposing an ROC/PR divergence that ROC-only reporting would hide.
+\end{itemize}
+
+\S\ref{sec:gap} locates each contribution against a specific, cited gap in prior work.
+
+%% ===================================================================
+\section{Related Work}
+\label{sec:related}
+%% ===================================================================
+
+We organize prior work by the five research lines this thesis sits at the intersection of, and state in \S\ref{sec:gap} precisely where each falls short of a calibrated, crowding-aware burst forecast.
+
+\paragraph{Self-exciting processes and liquidation cascades.} Modelling clustered financial events as self-exciting (Hawkes) processes is well established: \citet{bacry2015hawkes} survey Hawkes processes in finance, and \citet{hardiman2013endogeneity} use the branching ratio to quantify market endogeneity/reflexivity, the same mechanism \citet{filimonov2012reflexivity} tie to flash crashes. The closest DeFi work, \citet{cao2025defi}, shows liquidations cluster \emph{across} protocols in a multivariate Hawkes framework, and \citet{markovhawkes2025manipulation} extend Hawkes intensities with a Markov-modulated baseline for manipulation detection. This entire line models the intensity from \emph{event history alone} (Eq.~\eqref{eq:intensity}, second term); positioning/crowding state never enters the baseline $\mu_k$. A parallel nowcasting line \citep{nowcast2023crashrisk} predicts crash risk from order-flow imbalance but not from wallet-tier-resolved positioning.
+
+\paragraph{Perpetual-futures microstructure and liquidity risk.} Forward-looking liquidity risk for perpetuals has begun to attract dedicated frameworks such as Slippage-at-Risk \citep{slippageatrisk2026}, which quantifies execution risk but treats liquidation as an exogenous liquidity shock rather than a self-exciting, forecastable event stream.
+
+\paragraph{Marked and neural temporal point processes.} A rich model family conditions event intensity on learned history: recurrent marked TPPs \citep{du2016rmtpp}, the neural Hawkes process \citep{mei2017neuralhawkes}, the Transformer Hawkes process \citep{zuo2020thp}, spatio-temporal neural point processes \citep{zhou2022neuralstpp}, multi-event spatio-temporal forecasting \citep{beyondhawkes2022}, and recent state-space variants \citep{mambahawkes2024}, now benchmarked openly by EasyTPP \citep{xue2023easytpp}. These methods condition on event times and categorical \emph{marks}, but---as our THP baseline shows empirically---not on exogenous, continuous crowding covariates; the neural machinery raises expressivity over classical Hawkes yet lands in the same precision band when fed event times only (Table~\ref{tab:m2}).
+
+\paragraph{Topology and cross-asset structure of on-chain graphs.} Blockchain-network structure carries early-warning signal: topological anomaly detection on dynamic multilayer chains \citep{oforiboateng2021topological}, topological features for price-anomaly prediction \citep{xrp2026topological}, and persistence-velocity network anomaly detection \citep{persistencevelocity2025}. These motivate our cross-asset graph (the ST-GNN, \S\ref{sec:results}) but target price/label anomalies on transaction graphs, not synchronized liquidation bursts on a cross-asset positioning graph.
+
+\paragraph{Conformal prediction under distribution shift.} Because burst frequency drifts (test base rate $0.56\%$ vs.\ train $1.51\%$, \S\ref{sec:results}), calibrated uncertainty must survive non-stationarity: adaptive conformal inference \citep{gibbs2021adaptive}, conformal prediction for time series \citep{zaffran2022adaptive}, and drift-aware conformal streams \citep{driftconformal2026}. These supply the calibration layer of the planned system but have not been applied to a liquidation-burst point process.
+
+%% ===================================================================
+\section{Research Gap and Contributions}
+\label{sec:gap}
+%% ===================================================================
+
+Reading the five lines together exposes a specific, unfilled intersection.
+
+\begin{enumerate}[label=\textbf{G\arabic*:},leftmargin=*]
+    \item \textbf{Intensity-only cascade models ignore crowding.} DeFi/finance liquidation models \citep{cao2025defi,bacry2015hawkes,hardiman2013endogeneity} forecast from event history alone. Whether \emph{wallet-tier-resolved} positioning (imbalance, concentration, leverage) adds predictive power over self-excitation is untested.
+    \item \textbf{Neural TPPs are not conditioned on exogenous crowding.} State-of-the-art point processes \citep{zuo2020thp,mei2017neuralhawkes,du2016rmtpp} condition on times and marks, not on a continuous covariate stream of market positioning---so the covariate-vs-intensity question is not isolated \emph{within} one model family.
+    \item \textbf{Cross-protocol contagion is described, not forecast.} \citet{cao2025defi} establish cross-protocol clustering descriptively; no work turns cross-asset spillover into a calibrated, leakage-safe \emph{early-warning} forecast of the next burst.
+    \item \textbf{No calibrated, shift-aware burst early warning.} Conformal methods \citep{gibbs2021adaptive,zaffran2022adaptive} exist but have not been coupled to a liquidation point process to produce coverage-controlled lead-time/false-alarm guarantees under regime drift.
+    \item \textbf{Evaluation under extreme imbalance is mishandled.} A $0.56\%$ positive rate makes ROC-AUC misleading; the honest metric is precision-recall, an evaluation discipline absent from prior liquidation-cascade reporting.
+\end{enumerate}
+
+\paragraph{Contributions.} This thesis targets exactly this gap: (C1) a leakage-safe tier-aware \emph{crowding} panel and burst label on a 40.5M-event on-chain corpus (\S\ref{sec:related} G1); (C2) a covariate-conditioned neural point process (CovTPP) that injects crowding into the intensity baseline $\mu_k$ of Eq.~\eqref{eq:intensity}, isolating the covariate effect within the neural-TPP family against a THP baseline (G2); (C3) explicit cross-asset spillover features and an ST-GNN over a positioning graph, benchmarked against a multivariate Hawkes (G3); (C4) a PR-first evaluation on identical out-of-sample bins with a planned adaptive-conformal layer for the regime shift (G4, G5). The results (\S\ref{sec:results}) confirm the central claim of G1--G2: crowding covariates roughly double PR-AUC over intensity-only baselines within the same model family.
+
+%% ===================================================================
+\section{System Overview}
+\label{sec:system}
+%% ===================================================================
+
+At a glance the study is a single leakage-safe pipeline that turns a raw on-chain event log into a burst forecast, guarded by two feasibility probes and evaluated against published point-process baselines. Figure~\ref{fig:pipeline} shows the end-to-end data flow, Figure~\ref{fig:gates} the two go/no-go probes that fixed the direction, and Figure~\ref{fig:models} the model landscape (what each family consumes and how it scores). The formal target and the intensity it approximates are given in \S\ref{sec:formulation}; the covariate-modulated intensity that ties the models together is drawn in Figure~\ref{fig:intensity}.
+
+%% ── Fig: data pipeline ───────────────────────────────────────────
+\begin{figure}[ht]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[node distance=6mm and 9mm]
+  \node[data] (logs) {\texttt{logs}\\40.5M events};
+  \node[data, below=of logs] (prices) {\texttt{hyperliquid\_prices}\\93.7M min prices};
+  \node[proc, right=of logs] (pos) {Reconstruct\\positions\\\scriptsize\texttt{01\_reconstruct}};
+  \node[proc, right=14mm of pos] (panel) {Crowding panel\\(5-min bins, global grid)\\\scriptsize\texttt{panel\_builder.py}};
+  \node[data, below=8mm of panel] (parquet) {\texttt{burst\_panel.parquet}\\4.24M asset-bin rows};
+  \node[proc, right=14mm of panel] (split) {Time-ordered split\\70\% train / 30\% test\\\scriptsize no leakage};
+  \node[cov, above=8mm of split] (label) {Burst label $Y^{(h)}_{a,t}$\\Eq.~\eqref{eq:burst}};
+  \node[eval, right=of split] (models) {Models\\\& evaluation\\(Fig.~\ref{fig:models})};
+
+  \draw[flow] (logs) -- (pos);
+  \draw[flow] (pos) -- (panel);
+  \draw[flow] (prices.east) -- ++(6mm,0) |- (pos.west) node[lbl, pos=0.25, above] {magnet probe};
+  \draw[flow] (panel) -- (parquet);
+  \draw[flow] (panel) -- (split);
+  \draw[flow] (parquet.east) -- ++(4mm,0) |- (split.west);
+  \draw[flow] (label) -- (panel) node[lbl, midway, right] {$(t,t{+}h]$};
+  \draw[flow] (split) -- (models);
+\end{tikzpicture}}
+\caption{End-to-end pipeline. Raw \texttt{logs} are reconstructed into closed positions, then the panel builder emits one leakage-safe row per (asset, 5-min bin) on a global epoch-aligned grid: features from $[t-w,t]$, label from the disjoint future window $(t,t+h]$. The panel is split time-ordered (earlier bins train, later bins test) and every model is scored on the identical test bins.}
+\label{fig:pipeline}
+\end{figure}
+
+%% ── Fig: feasibility gates ───────────────────────────────────────
+\begin{figure}[ht]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[node distance=7mm and 12mm]
+  \node[data] (start) {Candidate\\directions};
+  \node[gate, right=of start] (g1) {Magnet?\\\scriptsize price pulled to walls};
+  \node[box=cFail, below=8mm of g1] (drop) {\textbf{Rejected}\\all null on BTC/SOL/ETH\\\scriptsize wall map kept as feature only};
+  \node[gate, right=20mm of g1] (g2) {Burst label\\learnable?};
+  \node[box=cFail, below=8mm of g2] (drop2) {Noise label\\\scriptsize (cf.\ wallet-skill $\rho{=}0.013$)};
+  \node[box=cPass, right=18mm of g2] (pass) {\textbf{Passed}\\AUC 0.75--0.91\\\scriptsize lock $h{=}15$min, $\theta{=}3$};
+  \node[cov, right=of pass] (go) {Model the\\\emph{lift} over\\self-excitation};
+
+  \draw[flow] (start) -- (g1);
+  \draw[flow] (g1) -- node[lbl, right] {no signal} (drop);
+  \draw[flow] (g1) -- node[lbl, above] {\S\ref{sec:m0magnet}} (g2);
+  \draw[flow] (g2) -- node[lbl, right] {} (drop2);
+  \draw[flow] (g2) -- node[lbl, above] {pass} (pass);
+  \draw[flow] (pass) -- (go);
+\end{tikzpicture}}
+\caption{Two feasibility probes gated the direction \emph{before} any modelling. Probe~1 (\S\ref{sec:m0magnet}) tested the liquidation-magnet hypothesis and was rejected under two independent test forms; the wall map survives only as a candidate feature. Probe~2 (\S\ref{sec:m0burst}) confirmed the burst label is dense and strongly learnable, so the open question becomes \emph{how much crowding adds over self-excitation}, not whether bursts are predictable.}
+\label{fig:gates}
+\end{figure}
+
+%% ── Fig: model landscape ─────────────────────────────────────────
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[node distance=5mm and 10mm]
+  % inputs
+  \node[data] (times) {Event times\\only};
+  \node[data, below=14mm of times] (feats) {17 crowding\\+ cross-asset\\covariates};
+
+  % baselines (intensity only)
+  \node[base, right=of times] (hawkes) {Univariate Hawkes (MLE)};
+  \node[base, below=3mm of hawkes] (mhawkes) {Market-augmented Hawkes};
+  \node[base, below=3mm of mhawkes] (thp) {Transformer Hawkes (THP)};
+
+  % covariate models (this work)
+  \node[cov, right=22mm of hawkes] (lgbm) {LightGBM (tuned)};
+  \node[cov, below=3mm of lgbm] (covtpp) {\textbf{CovTPP} (GRU hazard)};
+  \node[cov, below=3mm of covtpp] (stgnn) {ST-GNN (cross-asset graph)};
+
+  \node[eval, right=16mm of covtpp] (eval) {Identical\\test bins\\PR-AUC $\uparrow$};
+
+  \begin{scope}[on background layer]
+    \node[draw=cBase, dashed, rounded corners, fit=(hawkes)(thp),
+          label={[cBase,font=\scriptsize\bfseries]above:Published baselines (intensity only)}] {};
+    \node[draw=cCov, dashed, rounded corners, fit=(lgbm)(stgnn),
+          label={[cCov,font=\scriptsize\bfseries]above:Covariate-using models (this work)}] {};
+  \end{scope}
+
+  \draw[flow] (times.east) -- (hawkes.west);
+  \draw[flow] (times.east) |- (mhawkes.west);
+  \draw[flow] (times.east) |- (thp.west);
+  \draw[flow, draw=cCov] (feats.east) -- (covtpp.west);
+  \draw[flow, draw=cCov] (feats.east) |- (lgbm.west);
+  \draw[flow, draw=cCov] (feats.east) |- (stgnn.west);
+  % THP -> CovTPP within-family arrow (the key contrast)
+  \draw[flowd, draw=cCov] (thp.east) to[out=0,in=180] node[lbl, above] {same TPP family, $+$covariates: $0.13{\to}0.26$} (covtpp.west);
+  \draw[flow] (lgbm.east) -- (eval.west);
+  \draw[flow] (covtpp.east) -- (eval.west);
+  \draw[flow] (stgnn.east) -- (eval.west);
+\end{tikzpicture}
+\caption{Model landscape. Three published point-process baselines consume event times only; three models in this work add the 17 leakage-safe crowding/cross-asset covariates. The dashed arrow marks the decisive within-family contrast: the \emph{same} neural point-process family (THP $\to$ CovTPP) roughly doubles PR-AUC once conditioned on covariates. All six are scored on identical out-of-sample test bins (Table~\ref{tab:m2}).}
+\label{fig:models}
+\end{figure}
 
 %% ===================================================================
 \section{Data Overview}
@@ -286,6 +482,9 @@ The magnet null (\S\ref{sec:m0magnet}) is a useful negative result: it prevents 
     \label{fig:m1}
 \end{figure}
 
-\paragraph{References.} Full BibTeX entries in \texttt{references.bib}; supporting probe reports in \texttt{m0-magnet-findings.md}, \texttt{m0-burst-findings.md}, \texttt{m1-crowding-lift-findings.md}, \texttt{m2-baselines-findings.md}. Key works: Bacry, Mastromatteo \& Muzy (2015, Hawkes in finance); Hardiman, Bercot \& Bouchaud (2013, branching-ratio Hawkes); Filimonov \& Sornette (2012, reflexivity / flash crashes); Cao \& Palaash (2025, multivariate-Hawkes DeFi liquidations); Zuo et al.\ (2020, Transformer Hawkes Process); Mei \& Eisner (2017, Neural Hawkes Process); Du et al.\ (2016, recurrent marked TPP); Xue et al.\ (2023, EasyTPP benchmark); Gibbs \& Cand\`es (2021) and Zaffran et al.\ (2022, adaptive conformal prediction).
+\paragraph{Supporting reports.} {\sloppy Probe reports in \texttt{m0-magnet-findings.md}, \texttt{m0-burst-findings.md}, \texttt{m1-crowding-lift-findings.md}, \texttt{m2-baselines-findings.md}.\par} Related-work citations (\S\ref{sec:related}--\ref{sec:gap}) are listed below; entries flagged \emph{[unverified]} in \texttt{references.bib} have title/arXiv-id confirmed but author/venue to be checked before camera-ready.
+
+\bibliographystyle{plainnat}
+\bibliography{../references}
 
 \end{document}
