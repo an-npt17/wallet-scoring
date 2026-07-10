@@ -91,7 +91,7 @@ class STGNNBaselineService:
 
     def fit_score(
         self, panel: pl.DataFrame, cutoff_ts: int
-    ) -> tuple[NDArray[np.float64], NDArray[np.int8]]:
+    ) -> tuple[NDArray[np.float64], NDArray[np.int8], NDArray[np.int64]]:
         cfg = self._cfg
         _set_seed(cfg.seed)
         feats = self._features
@@ -163,6 +163,7 @@ class STGNNBaselineService:
         model.eval()
         scores: list[NDArray[np.float64]] = []
         labels: list[NDArray[np.int8]] = []
+        test_ts: list[NDArray[np.int64]] = []
         with torch.no_grad():
             W = cfg.window
             for s in range(0, n_steps, W):
@@ -177,9 +178,12 @@ class STGNNBaselineService:
                         continue
                     present = P[step] > 0
                     if present.any():
+                        n_present = int(present.sum())
                         scores.append(prob[local][present].astype(np.float64))
                         labels.append(Y[step][present].astype(np.int8))
+                        step_ts = (step + g0) * bs
+                        test_ts.append(np.full(n_present, step_ts, dtype=np.int64))
 
         if not scores:
-            return np.zeros(0), np.zeros(0, dtype=np.int8)
-        return np.concatenate(scores), np.concatenate(labels)
+            return np.zeros(0), np.zeros(0, dtype=np.int8), np.zeros(0, dtype=np.int64)
+        return np.concatenate(scores), np.concatenate(labels), np.concatenate(test_ts)

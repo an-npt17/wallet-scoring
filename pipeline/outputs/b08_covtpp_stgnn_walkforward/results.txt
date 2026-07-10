@@ -1,0 +1,43 @@
+  fold 0 CovTPP  : train 1,695,645 test 508,716 | ROC 0.9843  PR 0.4892
+  fold 0 ST-GNN  : train 1,695,645 test 508,716 | ROC 0.9845  PR 0.4924
+  fold 1 CovTPP  : train 2,204,361 test 508,716 | ROC 0.9845  PR 0.4730
+  fold 1 ST-GNN  : train 2,204,361 test 508,716 | ROC 0.9843  PR 0.4701
+  fold 2 CovTPP  : train 2,713,077 test 508,677 | ROC 0.9832  PR 0.3377
+  fold 2 ST-GNN  : train 2,713,077 test 508,677 | ROC 0.9817  PR 0.3383
+  fold 3 CovTPP  : train 3,221,754 test 508,733 | ROC 0.9789  PR 0.2634
+  fold 3 ST-GNN  : train 3,221,754 test 508,733 | ROC 0.9787  PR 0.2593
+  fold 4 CovTPP  : train 3,730,487 test 508,707 | ROC 0.9800  PR 0.2602
+  fold 4 ST-GNN  : train 3,730,487 test 508,707 | ROC 0.9807  PR 0.2555
+
+╔══════════════════════════════════════════════════════════════════╗
+║  WALK-FORWARD SUMMARY (mean +/- std across folds)                ║
+╚══════════════════════════════════════════════════════════════════╝
+  CovTPP   ROC-AUC 0.9822 +/- 0.0023   PR-AUC 0.3647 +/- 0.0991
+  ST-GNN   ROC-AUC 0.9820 +/- 0.0022   PR-AUC 0.3631 +/- 0.1011
+
+╔══════════════════════════════════════════════════════════════════╗
+║  BREAKDOWN BY VOL_REGIME                                         ║
+╚══════════════════════════════════════════════════════════════════╝
+  CovTPP   high_vol     n=1,252,036 pos_rate=0.0098 | ROC 0.9819  PR 0.4521
+  CovTPP   low_vol      n=1,291,513 pos_rate=0.0057 | ROC 0.9820  PR 0.2945
+  ST-GNN   high_vol     n=1,252,036 pos_rate=0.0098 | ROC 0.9818  PR 0.4519
+  ST-GNN   low_vol      n=1,291,513 pos_rate=0.0057 | ROC 0.9820  PR 0.2942
+
+╔══════════════════════════════════════════════════════════════════╗
+║  BREAKDOWN BY TREND_REGIME                                       ║
+╚══════════════════════════════════════════════════════════════════╝
+  CovTPP   bear         n=1,412,384 pos_rate=0.0086 | ROC 0.9831  PR 0.4417
+  CovTPP   bull         n=1,131,165 pos_rate=0.0065 | ROC 0.9809  PR 0.3140
+  ST-GNN   bear         n=1,412,384 pos_rate=0.0086 | ROC 0.9830  PR 0.4396
+  ST-GNN   bull         n=1,131,165 pos_rate=0.0065 | ROC 0.9805  PR 0.3117
+
+╔══════════════════════════════════════════════════════════════════╗
+║  BREAKDOWN BY CROWD_REGIME                                       ║
+╚══════════════════════════════════════════════════════════════════╝
+  CovTPP   high_crowd   n=933,894 pos_rate=0.0144 | ROC 0.9822  PR 0.4919
+  CovTPP   low_crowd    n=757,033 pos_rate=0.0028 | ROC 0.9732  PR 0.0869
+  CovTPP   med_crowd    n=852,622 pos_rate=0.0047 | ROC 0.9759  PR 0.1551
+  ST-GNN   high_crowd   n=933,894 pos_rate=0.0144 | ROC 0.9824  PR 0.4902
+  ST-GNN   low_crowd    n=757,033 pos_rate=0.0028 | ROC 0.9708  PR 0.0770
+  ST-GNN   med_crowd    n=852,622 pos_rate=0.0047 | ROC 0.9752  PR 0.1512
+

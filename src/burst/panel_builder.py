@@ -1,4 +1,5 @@
-"""Build a leakage-safe per-asset, 5-min-binned feature+label panel for
+"""
+Build a leakage-safe per-asset, 5-min-binned feature+label panel for
 liquidation-burst prediction.
 
 Every feature at bin t is computed from information available at or before t
@@ -20,13 +21,15 @@ Output: one row per (asset, active bin) with baseline + crowding + cross-asset
 
 import numpy as np
 import polars as pl
+from numpy import float64
 from numpy.typing import NDArray
 
 from src.burst.schemas import PanelConfig
 
 
 class _MarketSeries:
-    """Market-wide (all-asset) trailing liquidation series on the global grid.
+    """
+    Market-wide (all-asset) trailing liquidation series on the global grid.
 
     Indexed by global bin offset from `gmin`. Slice `[off:off+n]` for an asset
     whose first bin sits at global index `gmin + off`.
@@ -39,15 +42,15 @@ class _MarketSeries:
         liq_long: NDArray[np.float64],
         notional_short: NDArray[np.float64],
     ) -> None:
-        self.gmin = gmin
-        self.liq_short = liq_short
-        self.liq_long = liq_long
-        self.notional_short = notional_short
+        self.gmin: int = gmin
+        self.liq_short: NDArray[float64] = liq_short
+        self.liq_long: NDArray[float64] = liq_long
+        self.notional_short: NDArray[float64] = notional_short
 
 
 class BurstPanelBuilderService:
     def __init__(self, config: PanelConfig | None = None) -> None:
-        self._cfg = config or PanelConfig()
+        self._cfg: PanelConfig = config or PanelConfig()
 
     def build(self, positions: pl.DataFrame) -> pl.DataFrame:
         cfg = self._cfg
@@ -58,8 +61,15 @@ class BurstPanelBuilderService:
             & (pl.col("open_ts") > 0)
             & (pl.col("close_ts") > pl.col("open_ts"))
         ).select(
-            ["asset", "side", "entry_size_usd", "entry_leverage",
-             "open_ts", "close_ts", "close_action"]
+            [
+                "asset",
+                "side",
+                "entry_size_usd",
+                "entry_leverage",
+                "open_ts",
+                "close_ts",
+                "close_action",
+            ]
         )
         liq_per_asset = (
             base.filter(pl.col("close_action") == "Liquidate")
@@ -73,7 +83,9 @@ class BurstPanelBuilderService:
 
         frames: list[pl.DataFrame] = []
         for asset in assets:
-            frame = self._build_asset(base.filter(pl.col("asset") == asset), asset, market)
+            frame = self._build_asset(
+                base.filter(pl.col("asset") == asset), asset, market
+            )
             if frame is not None:
                 frames.append(frame)
         if not frames:
@@ -81,8 +93,10 @@ class BurstPanelBuilderService:
         return pl.concat(frames, how="vertical")
 
     def _build_market(self, base: pl.DataFrame) -> _MarketSeries:
-        """Precompute market-wide trailing liquidation count and notional on the
-        global bin grid spanning every position's open..close range."""
+        """
+        Precompute market-wide trailing liquidation count and notional on the
+        global bin grid spanning every position's open..close range.
+        """
         cfg = self._cfg
         bs = cfg.bin_seconds
         gmin = int(base["open_ts"].min()) // bs
@@ -143,7 +157,9 @@ class BurstPanelBuilderService:
         cb = np.clip(close_ts // bs - g0, 0, n_bins - 1).astype(np.int64)
 
         # Open-interest step series via +size at open bin, -size at close bin.
-        def open_series(weight: NDArray[np.float64], mask: NDArray[np.bool_]) -> NDArray[np.float64]:
+        def open_series(
+            weight: NDArray[np.float64], mask: NDArray[np.bool_]
+        ) -> NDArray[np.float64]:
             delta = np.zeros(n_bins + 1)
             np.add.at(delta, ob[mask], weight[mask])
             np.add.at(delta, cb[mask], -weight[mask])
@@ -174,32 +190,43 @@ class BurstPanelBuilderService:
             lo = np.clip(idx - k, 0, None)
             return cumsum[idx + 1] - cumsum[lo]
 
-        def forward(k: int) -> NDArray[np.float64]:
+        def forward(cumsum: NDArray[np.float64], k: int) -> NDArray[np.float64]:
             idx = np.arange(n_bins)
             hi = np.clip(idx + 1 + k, 0, n_bins)
-            return cs[hi] - cs[idx + 1]
+            return cumsum[hi] - cumsum[idx + 1]
 
         eps = cfg.eps
         past_short = trailing(cs, cfg.past_short_bins)
         past_long = trailing(cs, cfg.past_long_bins)
         past_notional_short = trailing(cs_usd, cfg.past_short_bins)
         past_notional_long = trailing(cs_usd, cfg.past_long_bins)
-        future = forward(cfg.horizon_bins)
+        future = forward(cs, cfg.horizon_bins)
         label = (future >= cfg.threshold).astype(np.int8)
+        # USD notional of the same future burst window; lets downstream eval
+        # weight precision/recall by dollar value rather than raw event count.
+        future_notional = forward(cs_usd, cfg.horizon_bins)
 
         # Cross-asset (market-wide) trailing signal on the same bins.
         off = g0 - market.gmin
-        market_short = market.liq_short[off: off + n_bins]
-        market_long = market.liq_long[off: off + n_bins]
-        market_notional_short = market.notional_short[off: off + n_bins]
+        market_short = market.liq_short[off : off + n_bins]
+        market_long = market.liq_long[off : off + n_bins]
+        market_notional_short = market.notional_short[off : off + n_bins]
         # Spillover = other assets = market minus self (clip float noise).
         other_short = np.maximum(market_short - past_short, 0.0)
-        other_notional_short = np.maximum(market_notional_short - past_notional_short, 0.0)
+        other_notional_short = np.maximum(
+            market_notional_short - past_notional_short, 0.0
+        )
 
         oi_imbalance = (oi_long - oi_short) / (oi_long + oi_short + eps)
-        large_imb = (oi_large_long - oi_large_short) / (oi_large_long + oi_large_short + eps)
-        small_imb = (oi_small_long - oi_small_short) / (oi_small_long + oi_small_short + eps)
-        oi_prev = np.concatenate([np.zeros(cfg.past_short_bins), oi_total[:-cfg.past_short_bins]])
+        large_imb = (oi_large_long - oi_large_short) / (
+            oi_large_long + oi_large_short + eps
+        )
+        small_imb = (oi_small_long - oi_small_short) / (
+            oi_small_long + oi_small_short + eps
+        )
+        oi_prev = np.concatenate(
+            [np.zeros(cfg.past_short_bins), oi_total[: -cfg.past_short_bins]]
+        )
 
         panel = pl.DataFrame(
             {
@@ -216,12 +243,16 @@ class BurstPanelBuilderService:
                 "large_share": oi_large / (oi_total + eps),
                 "mean_leverage": oi_lev / (oi_total + eps),
                 "oi_velocity": oi_total - oi_prev,
-                "liq_velocity": past_short - (past_long - past_short) / max(cfg.past_long_bins - cfg.past_short_bins, 1) * cfg.past_short_bins,
+                "liq_velocity": past_short
+                - (past_long - past_short)
+                / max(cfg.past_long_bins - cfg.past_short_bins, 1)
+                * cfg.past_short_bins,
                 "market_liq_short": market_short,
                 "market_liq_long": market_long,
                 "market_liq_notional_short": market_notional_short,
                 "other_liq_short": other_short,
                 "other_liq_notional_short": other_notional_short,
+                "future_notional": future_notional,
                 "label": label,
             }
         )

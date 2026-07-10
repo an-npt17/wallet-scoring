@@ -46,7 +46,7 @@ def _run(out_dir: Path) -> None:
 
     _print_box("TRAINING SPATIO-TEMPORAL GNN (cross-asset graph + GRU)")
     svc = STGNNBaselineService(STGNNConfig())
-    p, y = svc.fit_score(panel, cutoff)
+    p, y, _ts = svc.fit_score(panel, cutoff)
     roc = float(roc_auc_score(y, p))
     pr = float(average_precision_score(y, p))
 

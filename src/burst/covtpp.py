@@ -1,4 +1,5 @@
-"""Covariate-conditioned neural temporal point process for liquidation-burst
+"""
+Covariate-conditioned neural temporal point process for liquidation-burst
 prediction.
 
 The classical/neural Hawkes baselines (b02/b03) use only event *times*, ignoring
@@ -37,19 +38,19 @@ class CovTPPConfig(BaseModel):
 
 def _set_seed(seed: int) -> None:
     np.random.seed(seed)
-    torch.manual_seed(seed)
+    _ = torch.manual_seed(seed)
 
 
 class CovTPPModel(nn.Module):
     def __init__(self, cfg: CovTPPConfig, n_features: int) -> None:
         super().__init__()
-        self.gru = nn.GRU(
+        self.gru: nn.GRU = nn.GRU(
             input_size=n_features + 1,  # +1 for log inter-bin gap
             hidden_size=cfg.hidden,
             num_layers=cfg.n_layers,
             batch_first=True,
         )
-        self.head = nn.Linear(cfg.hidden, 1)
+        self.head: nn.Linear = nn.Linear(cfg.hidden, 1)
 
     def intensity(self, x: Tensor, h0: Tensor | None = None) -> tuple[Tensor, Tensor]:
         # x: (B, T, F+1) -> lambda: (B, T); returns final hidden for carry.
@@ -60,7 +61,7 @@ class CovTPPModel(nn.Module):
 
 class CovTPPBaselineService:
     def __init__(self, config: CovTPPConfig | None = None) -> None:
-        self._cfg = config or CovTPPConfig()
+        self._cfg: CovTPPConfig = config or CovTPPConfig()
         pc = PanelConfig()
         self._features: list[str] = (
             pc.baseline_features
@@ -79,7 +80,7 @@ class CovTPPBaselineService:
 
     def fit_score(
         self, panel: pl.DataFrame, cutoff_ts: int
-    ) -> tuple[NDArray[np.float64], NDArray[np.int8]]:
+    ) -> tuple[NDArray[np.float64], NDArray[np.int8], NDArray[np.int64]]:
         cfg = self._cfg
         _set_seed(cfg.seed)
         feats = self._features
@@ -93,7 +94,15 @@ class CovTPPBaselineService:
 
         assets: list[str] = panel["asset"].unique().to_list()
         # Per-asset arrays: standardized features, dt, label, ts.
-        seqs: dict[str, tuple[NDArray[np.float32], NDArray[np.float64], NDArray[np.int8], NDArray[np.int64]]] = {}
+        seqs: dict[
+            str,
+            tuple[
+                NDArray[np.float32],
+                NDArray[np.float64],
+                NDArray[np.int8],
+                NDArray[np.int64],
+            ],
+        ] = {}
         for a in assets:
             sub = panel.filter(pl.col("asset") == a)
             if sub.height < cfg.min_asset_bins:
@@ -115,21 +124,22 @@ class CovTPPBaselineService:
             tr = ts < cutoff_ts
             xt, yt = xd[tr], y[tr]
             for start in range(0, max(len(xt) - 1, 1), cfg.stride):
-                xs, ys = xt[start: start + cfg.window], yt[start: start + cfg.window]
+                xs, ys = xt[start : start + cfg.window], yt[start : start + cfg.window]
                 if len(xs) >= 16:
                     windows.append((xs, ys))
 
         try:
             from tqdm import tqdm
+
             epoch_iter = tqdm(range(cfg.epochs), desc="CovTPP train", unit="epoch")
         except ImportError:
             epoch_iter = range(cfg.epochs)
 
-        model.train()
+        _ = model.train()
         for _ in epoch_iter:
             perm = np.random.permutation(len(windows))
             for i in range(0, len(perm), cfg.batch_size):
-                idx = perm[i: i + cfg.batch_size]
+                idx = perm[i : i + cfg.batch_size]
                 lens = [len(windows[j][0]) for j in idx]
                 mx = max(lens)
                 bx = torch.zeros(len(idx), mx, len(feats) + 1)
@@ -151,6 +161,7 @@ class CovTPPBaselineService:
         model.eval()
         scores: list[NDArray[np.float64]] = []
         labels: list[NDArray[np.int8]] = []
+        test_ts: list[NDArray[np.int64]] = []
         with torch.no_grad():
             for a, (xd, _dt, y, ts) in seqs.items():
                 test_mask = ts >= cutoff_ts
@@ -161,7 +172,8 @@ class CovTPPBaselineService:
                 p = (1.0 - torch.exp(-lam.squeeze(0))).cpu().numpy()
                 scores.append(p[test_mask])
                 labels.append(y[test_mask])
+                test_ts.append(ts[test_mask])
 
         if not scores:
-            return np.zeros(0), np.zeros(0, dtype=np.int8)
-        return np.concatenate(scores), np.concatenate(labels)
+            return np.zeros(0), np.zeros(0, dtype=np.int8), np.zeros(0, dtype=np.int64)
+        return np.concatenate(scores), np.concatenate(labels), np.concatenate(test_ts)

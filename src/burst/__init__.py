@@ -1,6 +1,7 @@
 from src.burst.covtpp import CovTPPBaselineService, CovTPPConfig
 from src.burst.hawkes import HawkesBaselineService, HawkesParams
 from src.burst.panel_builder import BurstPanelBuilderService
+from src.burst.regime import MarketRegimeConfig, MarketRegimeService
 from src.burst.schemas import PanelConfig
 from src.burst.stgnn import STGNNBaselineService, STGNNConfig
 from src.burst.thp import THPBaselineService, THPConfig
@@ -20,4 +21,6 @@ __all__ = [
     "CovTPPConfig",
     "STGNNBaselineService",
     "STGNNConfig",
+    "MarketRegimeService",
+    "MarketRegimeConfig",
 ]

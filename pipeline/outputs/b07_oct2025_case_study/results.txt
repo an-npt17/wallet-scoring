@@ -1,0 +1,17 @@
+  train rows: 1,309,753 (cutoff 2025-10-07 00:00:00+00:00)
+  event window rows: 54,968 (2025-10-09 00:00:00+00:00 to 2025-10-14 00:00:00+00:00)
+  event window positive rate: 0.0331
+
+╔══════════════════════════════════════════════════════════════════╗
+║  OCT 10-11 2025 CASE STUDY: OUT-OF-SAMPLE RESULTS                ║
+╚══════════════════════════════════════════════════════════════════╝
+  baseline  ROC 0.9626  PR 0.6917
+  full      ROC 0.9694  PR 0.6982
+  lift      ROC +0.0068  PR +0.0065
+
+  precision@5% = 0.5066   recall@5% = 0.7657
+
+  dominant asset in event window: BTC (n_burst_bins=890)
+  alarm threshold (train top-5% score) = 0.8515
+  lead time on BTC = +20 min (positive = alarm before first burst bin)
+

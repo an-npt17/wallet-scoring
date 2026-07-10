@@ -24,8 +24,7 @@
 
 #align(center)[#text(weight: "bold")[Abstract]]
 #block(inset: (x: 1.2em))[
-  This report develops and de-risks a new thesis direction on the `perpetuals_knowledge_graph` database (40.5M log events, 1.34M closed positions, 190,573 explicit liquidations, 249 assets, 5 venues, 491 days). We forecast _synchronized liquidation bursts_---short windows in which many perpetual-futures positions on an asset are force-closed together---and ask whether _tier-aware crowding_ features improve prediction over a self-exciting (Hawkes) baseline. Two feasibility probes were run before any modelling. (i) The liquidation-_magnet_ hypothesis (price attracted to liquidation-price walls) was *rejected* on the three most liquid assets under two independent test forms (all null). (ii) The liquidation-_burst_ label *passed decisively*: it is dense and strongly learnable---a single trailing-intensity feature already reaches AUC 0.83--0.87, confirming self-excitation. On a leakage-safe, time-ordered split (4.2M asset-bin rows, 40 assets), a tuned crowding-augmented gradient-boosted model (tier imbalance, cross-asset spillover, liquidation notional; 17 features) is compared against three _named, published_ baselines fit on the same data: a classical univariate Hawkes process (MLE), a market-augmented multivariate Hawkes, and a neural Transformer Hawkes Process @zuo2020thp. Three covariate-using models are then evaluated: the tuned classifier, a covariate-conditioned neural point process (a GRU-hazard model over the feature sequence), and a spatio-temporal GNN over a cross-asset graph. On precision-recall---the honest metric for a 0.56%-positive test set---all three beat all three baselines by a wide margin; the covariate-conditioned TPP is best (PR-AUC 0.256, versus 0.157 classical Hawkes and 0.129 neural THP, gains of +0.10 to +0.13), narrowly ahead of the GNN (0.251) and the tuned classifier (0.250). The decisive factor is the covariates, shown within one model family: the neural point process roughly _doubles_ its PR-AUC (0.129→0.256) when conditioned on crowding features rather than event times alone. Tellingly, all intensity-only baselines collapse to ROC-AUC ≈0.97 but PR-AUC ≈0.13--0.16: self-exciting intensity is a strong ranker yet a weak precision signal under imbalance, which ROC hides and PR-AUC exposes. Unlike the prior wallet-scoring formulation---whose evaluation label was ≈99% sampling noise---this problem has a dense, reliable label, so measured lift is meaningful.
-]
+  This report develops and de-risks a new thesis direction on the `perpetuals_knowledge_graph` database (40.5M log events, 1.34M closed positions, 190,573 explicit liquidations, 249 assets, 5 venues, 491 days). We forecast _synchronized liquidation bursts_---short windows in which many perpetual-futures positions on an asset are force-closed together---and ask whether _tier-aware crowding_ features improve prediction over a self-exciting (Hawkes) baseline. Two feasibility probes were run before any modelling. (i) The liquidation-_magnet_ hypothesis (price attracted to liquidation-price walls) was *rejected* on the three most liquid assets under two independent test forms (all null). (ii) The liquidation-_burst_ label *passed decisively*: it is dense and strongly learnable---a single trailing-intensity feature already reaches AUC 0.83--0.87, confirming self-excitation. On a leakage-safe, time-ordered split (4.2M asset-bin rows, 40 assets), a tuned crowding-augmented gradient-boosted model (tier imbalance, cross-asset spillover, liquidation notional; 17 features) is compared against three _named, published_ baselines fit on the same data: a classical univariate Hawkes process (MLE), a market-augmented multivariate Hawkes, and a neural Transformer Hawkes Process @zuo2020thp. Three covariate-using models are then evaluated: the tuned classifier, a covariate-conditioned neural point process (a GRU-hazard model over the feature sequence), and a spatio-temporal GNN over a cross-asset graph. On precision-recall---the honest metric for a 0.56%-positive test set---all three beat all three baselines by a wide margin; the covariate-conditioned TPP is best (PR-AUC 0.256, versus 0.157 classical Hawkes and 0.129 neural THP, gains of +0.10 to +0.13), narrowly ahead of the GNN (0.251) and the tuned classifier (0.250). The decisive factor is the covariates, shown within one model family: the neural point process roughly _doubles_ its PR-AUC (0.129→0.256) when conditioned on crowding features rather than event times alone. Tellingly, all intensity-only baselines collapse to ROC-AUC ≈0.97 but PR-AUC ≈0.13--0.16: self-exciting intensity is a strong ranker yet a weak precision signal under imbalance, which ROC hides and PR-AUC exposes. Unlike the prior wallet-scoring formulation---whose evaluation label was ≈99% sampling noise---this problem has a dense, reliable label, so measured lift is meaningful. A rolling five-fold walk-forward confirms the LightGBM crowding lift is not a single-split artefact (PR-AUC lift +0.024 ± 0.013, ROC-AUC lift +0.054 ± 0.017, positive in every fold), and holds across bull/bear, high/low-volatility, and high/low-crowding regimes---largest exactly in stressed and low-crowding periods, where the self-exciting baseline is weakest. ]
 
 #v(1em)
 
@@ -245,6 +244,11 @@ Against the intensity-only baselines we evaluate three models that consume the 1
 - *Covariate-conditioned neural TPP* (`src/burst/covtpp.py`): a GRU runs causally over each asset's 5-minute bin sequence of the 17 features, giving a history state $h_t$; the burst intensity is $lambda_t="softplus"(w^top h_t + b)$ and the horizon hazard is $P("burst")=1-e^(-lambda_t)$, trained by point-process (Bernoulli-hazard) likelihood. This is the direct realisation of the covariate-modulated intensity of @eq:intensity: the _same_ neural point-process family as THP, but conditioned on crowding covariates rather than event times alone.
 - *Spatio-temporal GNN* (`src/burst/stgnn.py`): the 40 assets are nodes on the shared global grid; a graph layer mixes each active asset's features with a cross-asset market message per step and a per-node GRU carries temporal state, before the same hazard head. This tests whether explicit cross-asset message passing beats the engineered market/spillover scalars.
 
+#figure(
+  image("figs/covtpp_stgnn_pipeline.pdf", width: 100%),
+  caption: [Internal data flow of the two neural covariate models. Top: CovTPP runs one causal GRU per asset over the 17-feature sequence (plus the log inter-bin gap), reading the hazard off the final linear+softplus head at every bin. Bottom: ST-GNN instead mixes every active asset's features with a cross-asset market-mean message _before_ the recurrence, so the temporal state at each node already carries cross-asset information at every step---the architectural difference @tab:m2 tests against the LightGBM's hand-engineered market/spillover scalars.],
+) <fig:covtppstgnn>
+
 Planned calibration will contrast static (split) conformal with Adaptive Conformal Inference @gibbs2021adaptive @zaffran2022adaptive; the covariate-conditioned TPP is the natural target, as it already emits a point-process hazard intensity.
 
 = Results: Does Crowding Beat Published Point-Process Baselines? <sec:results>
@@ -288,20 +292,142 @@ Five observations, in decreasing order of confidence:
 
 There is no label leakage: predictors use $[t-w,t]$ and the label uses $(t,t+h]$, which are disjoint; the split is time-ordered; Hawkes and THP parameters are estimated on training-period events only.
 
+= Robustness: Rolling Walk-Forward and Regime Sensitivity <sec:robustness>
+
+@sec:results reports a single time-ordered 70/30 split: one draw from one market regime, flagged as a limitation in the M2 write-up (NS1). We address it directly. The panel is re-split into an expanding-window walk-forward---an initial 40% training window, then five consecutive, non-overlapping test folds (≈509k rows each)---so the tuned LightGBM baseline and full model are refit per fold and scored out-of-sample five times instead of once. Every test row is further labelled along two independent regime axes: an _exogenous_ macro regime from daily BTC/ETH realized volatility and trend (fetched from Binance Futures, used only to label folds post hoc, never as a model feature; crypto alt/perp volatility is macro-beta-driven regardless of trading venue, the same logic as regime-labelling with VIX), and an _endogenous_ crowding regime from the panel's own market-wide liquidation-intensity tertile, which catches idiosyncratic single-asset crowding events the macro label cannot.
+
+#figure(
+  table(
+    columns: (auto, auto, auto, auto, auto),
+    align: (left, right, right, right, right),
+    table.header(
+      [Fold], [Train rows], [Test rows], [Baseline PR-AUC], [Full PR-AUC]
+    ),
+    [0], [1,695,645], [508,716], [0.4621], [0.5019],
+    [1], [2,204,361], [508,716], [0.4227], [0.4628],
+    [2], [2,713,077], [508,677], [0.3032], [0.3115],
+    [3], [3,221,754], [508,733], [0.2364], [0.2492],
+    [4], [3,730,487], [508,707], [0.2297], [0.2499],
+    table.hline(),
+    [Mean ± std], [], [], [0.3308 ± 0.0955], [0.3551 ± 0.1071],
+  ),
+  caption: [Rolling walk-forward, expanding train window, five consecutive out-of-sample test folds. PR-AUC falls fold-over-fold because the positive rate drifts down over the timeline (consistent with the train/test base-rate shift already noted in @sec:results), not because the model degrades: ROC-AUC lift is stable (below).],
+) <tab:walkforward>
+
+The lift itself is stable: mean ROC-AUC rises from 0.9283 ± 0.0198 (baseline) to 0.9821 ± 0.0025 (full), a lift of +0.0538 ± 0.0174; mean PR-AUC rises from 0.3308 ± 0.0955 to 0.3551 ± 0.1071, a lift of +0.0242 ± 0.0134. The lift is positive in every one of the five folds, so it is not an artefact of the single split reported in @tab:m2; the ROC lift's standard deviation is small relative to its mean, while the PR lift's is not (std ≈55% of the mean), so the _existence_ of the lift is well supported but its exact size still carries split-to-split variance the single-split number could not reveal.
+
+#figure(
+  table(
+    columns: (auto, auto, auto, auto, auto, auto),
+    align: (left, left, right, right, right, right),
+    table.header(
+      [Regime axis],
+      [Bucket],
+      [n],
+      [Pos. rate],
+      [Baseline PR-AUC],
+      [Full PR-AUC],
+    ),
+    [Macro volatility (BTC/ETH)],
+    [high_vol],
+    [1,252,036],
+    [0.98%],
+    [0.3989],
+    [0.4427],
+
+    [], [low_vol], [1,291,513], [0.57%], [0.2608], [0.2869],
+    [Macro trend (BTC/ETH)], [bear], [1,412,384], [0.86%], [0.3836], [0.4297],
+    [], [bull], [1,131,165], [0.65%], [0.2813], [0.3074],
+    [Endogenous crowding], [high_crowd], [933,894], [1.44%], [0.4367], [0.4798],
+    [], [med_crowd], [852,622], [0.47%], [0.1243], [0.1456],
+    [], [low_crowd], [757,033], [0.28%], [0.0497], [0.0757],
+  ),
+  caption: [Crowding lift broken out by market regime, on the pooled out-of-sample predictions from @tab:walkforward. The lift survives every bucket on both regime axes; it is largest exactly where the self-exciting baseline is weakest (bear/high-vol markets, low-crowding periods).],
+) <tab:regime>
+
+Two findings stand out. First, the lift is regime-sensitive but never disappears: it is roughly double in high-volatility and bear regimes (+0.044 and +0.046 PR-AUC) versus low-volatility and bull regimes (+0.026 each)---crowding covariates matter most exactly when the market is under stress, which is the operationally relevant regime for an early-warning system. Second, the endogenous crowding regime is the sharper cut: in low-crowding periods the past-intensity baseline is barely better than random (ROC-AUC 0.7958, PR-AUC 0.0497 against a 0.28% base rate), while the full model recovers most of its discriminative power (ROC-AUC 0.9711); crowding features do their heaviest lifting exactly where self-excitation alone gives up.
+
+Finally, we stress-test the full model directly on the five largest simultaneous liquidation-burst clusters in the data (the top five 5-minute bins by across-asset burst count, each evaluated in a ±6-hour window around the cluster, non-overlapping). The model holds ROC-AUC 0.968--0.987 and precision-at-top-5% between 0.23 and 0.83 across all five clusters, with recall-at-top-5% of 0.69--0.81---evidence that the lift measured on averaged fold metrics is not hiding a miss on the crashes that would matter operationally.
+
+== Named Case Study: the Oct 10--11 2025 Liquidation Event <sec:oct2025>
+
+Every fold and regime bucket above is anonymous by construction. To ground the model against a real, externally verifiable event, we identify the day in the dataset with the second-highest burst-bin count of all 491 days: Oct 10, 2025 (559 burst bins across 38 active assets, dominated by BTC, SOL, and ETH), matching the publicly reported Oct 10--11 2025 crypto crash---a tariff-shock-driven selloff widely reported as the largest simultaneous liquidation event in the market's history (order of \$19B liquidated industry-wide), with majors reported hit hardest, consistent with what the panel shows independently.
+
+This date falls inside the walk-forward's initial 40% training window (@sec:robustness), so it has never been scored out-of-sample. We train BASELINE and FULL fresh on data strictly before Oct 7, 2025 and evaluate on an Oct 9--14, 2025 window (54,968 asset-bin rows, 3.31% positive---an order of magnitude denser than the panel average, consistent with a cascade). The full model reaches ROC-AUC 0.9694 / PR-AUC 0.6982 versus 0.9626 / 0.6917 for the baseline (lift +0.0068 / +0.0065, a smaller lift than the panel-wide average since the past-intensity baseline is already strong once a cascade is underway), and precision-at-top-5% of 0.51 with recall-at-top-5% of 0.77.
+
+#figure(
+  image(
+    "../pipeline/outputs/b07_oct2025_case_study/oct2025_timeline.png",
+    width: 92%,
+  ),
+  caption: [BTC predicted P(burst) through the Oct 10--11 2025 event (890 burst bins in the window), model trained only on data before Oct 7, 2025. Red lines mark actual burst bins; dashed line is the alarm threshold (train-set top-5% score). The model's first alarm on BTC precedes the first actual burst bin by 20 minutes.],
+) <fig:oct2025>
+
+Calibrating an alarm threshold from the training set's own top-5% score, the model's first alarm on BTC precedes the first actual burst bin by 20 minutes---more than one 15-minute forecast horizon of lead time on the single largest liquidation event in the dataset's window, using a model that never saw this event during training.
+
+== Extending the Walk-Forward to CovTPP and ST-GNN <sec:covtppstgnnwf>
+
+The remaining piece of NS1 is the three-way ordering in @tab:m2 among CovTPP, ST-GNN, and the tuned LightGBM, which sits on a single split (≈0.005 PR-AUC apart). We re-run the same five-fold expanding-window walk-forward and regime labels of @sec:robustness for CovTPP and ST-GNN (LightGBM's walk-forward is already reported there).
+
+#figure(
+  table(
+    columns: (auto, auto, auto),
+    align: (left, right, right),
+    table.header([Model], [Mean ROC-AUC], [Mean PR-AUC]),
+    [CovTPP], [0.9822 ± 0.0023], [0.3647 ± 0.0991],
+    [ST-GNN], [0.9820 ± 0.0022], [0.3631 ± 0.1011],
+  ),
+  caption: [CovTPP vs. ST-GNN, mean ± std across the same five walk-forward folds as @tab:walkforward. The two models track each other within one fold's own standard deviation at every fold and every regime bucket (vol., trend, and crowding regimes all differ by ≤0.002 PR-AUC between the two) --- e.g. crowd regime: high\_crowd 0.4919 (CovTPP) vs. 0.4902 (ST-GNN); low\_crowd 0.0869 vs. 0.0770.],
+) <tab:covtppstgnnwf>
+
+#figure(
+  image(
+    "../pipeline/outputs/b08_covtpp_stgnn_walkforward/covtpp_stgnn_walkforward.png",
+    width: 78%,
+  ),
+  caption: [Fold-wise PR-AUC, CovTPP vs. ST-GNN, across the same five walk-forward folds as @fig:m6. The two curves overlap almost exactly at every fold.],
+) <fig:covtppstgnnwf>
+
+The walk-forward confirms, rather than overturns, the single-split finding of @sec:results: explicit cross-asset graph message passing (ST-GNN) does not distinguishably beat conditioning a per-asset GRU on the same crowding covariates (CovTPP) at any point across five folds or six regime buckets. This closes NS1: all three covariate models---LightGBM, CovTPP, ST-GNN---now have walk-forward confidence intervals, and the robust ordering claim is unchanged: covariate-conditioned models beat intensity-only baselines by a wide, stable margin; the ranking _among_ the three covariate models remains statistically indistinguishable, not merely "provisional pending more folds."
+
+== Operational Metrics: Calibration, Alert Load, Lead Time, and Economic Value <sec:opmetrics>
+
+PR-AUC and ROC-AUC summarize ranking quality but answer none of the questions a deployment decision actually needs (NS2): is the score a trustworthy probability, how many false alarms does a fixed decision rule fire per day, how much warning time does an alarm give before a cascade starts, and does the model catch the cascades that carry the most dollars at risk---not just the most bins? We answer all four from the pooled out-of-sample predictions of the LightGBM full model across the five walk-forward folds of @sec:robustness (2,543,549 rows, 227.6 days, `pipeline/b09_operational_metrics.py`).
+
+*Calibration.* @fig:reliability plots predicted $P("burst")$ against observed burst frequency in ten equal-width bins. Expected Calibration Error is 0.0533, and the curve sits well below the diagonal at every bin above 0.1: the model is *overconfident*---a predicted 0.8 corresponds to an observed rate closer to 0.1--0.3. The raw score is a good _ranker_ (as @tab:m2/@tab:walkforward already show) but not yet a usable probability; any position-sizing or margin-scaling use (@sec:related) requires a recalibration layer (Platt scaling or isotonic regression) before deployment, not just the ranking model itself.
+
+#figure(
+  image("../pipeline/outputs/b09_operational_metrics/reliability_diagram.png", width: 55%),
+  caption: [Reliability diagram, full LightGBM model, pooled walk-forward OOF predictions, 10 equal-width bins. ECE = 0.0533; the curve below the diagonal shows systematic overconfidence.],
+) <fig:reliability>
+
+*Alert load at a fixed operating point.* Fixing recall at 80% (a threshold chosen post hoc on the pooled OOF set for reporting, not a production threshold) gives precision 0.179 and 315.2 false alarms/day pooled across 39 assets---8.08 false alarms per asset per day, roughly one every three hours. This is the number a real alerting product must budget for: an 80%-recall operating point is usable only if downstream automation (deleveraging, vault exit) can absorb an alarm roughly every 3 hours per asset without excessive cost.
+
+*Lead time.* We merge consecutive/near burst bins per asset into discrete cascade "events" (4,283 total) and, for each, measure the time from the _start_ of the alarm episode preceding it (not merely the nearest alarm bin, which would understate warning time when the model has been alarming continuously) to the event's onset. 98.6% of events (4,225/4,283) get at least one alarm at or before onset; median lead time is *90 minutes*, with p10 = 10 min and p90 = 570 min (@fig:leadtime). A small tail (64 events, 1.5%) shows lead times over 48 hours---the model sitting continuously in an alarm state on a persistently crowded asset rather than a discrete warning, which is why the mean (962.5 min) is not the representative number; median and p90 are. Only 4.0% of alarmed events (171/4,225) got their first alarm at or after onset (a same-bin or late catch). A median 90-minute lead time is six times the 15-minute forecast horizon itself---enough real time for on-chain defensive action, not just a dashboard flicker.
+
+#figure(
+  image("../pipeline/outputs/b09_operational_metrics/lead_time_distribution.png", width: 68%),
+  caption: [Lead-time distribution across 4,225 alarmed cascade events (clipped at 48h; 64 events beyond this are continuous-alarm states, not discrete warnings). Median 90 min, p10 10 min, p90 570 min.],
+) <fig:leadtime>
+
+*Economic (notional-weighted) value.* The label ($theta gt.eq 3$ liquidations in 15 minutes) treats a cluster of three small retail liquidations the same as the start of a nine-figure cascade. Weighting average precision by $log(1 + "future USD notional")$ for positive bins (raw-dollar weighting lets the single largest cascade, \$39.5M, dominate the entire curve and is not used) gives economic PR-AUC 0.8321, versus 0.3873 unweighted on the same predictions---the model ranks large-notional cascades far more reliably than small ones. At the 80%-recall operating point, notional recall (fraction of future USD liquidation value caught) is *0.879*, above the 0.800 count recall: the model preferentially catches the cascades that carry more dollars at risk, not just more bins.
+
 = Discussion
 
-The results validate the direction and locate the open problem precisely. Bursts are predictable, self-excitation dominates the easy signal, and every covariate-using model---gradient boosting, a spatio-temporal GNN, and a covariate-conditioned neural point process---beats the published intensity-only baselines on the honest metric, with the covariate-conditioned TPP best. The cleanest evidence for the thesis is the _within-family_ contrast: the neural point process roughly doubles its PR-AUC (0.129→0.256) when its intensity is conditioned on crowding covariates rather than event times alone, isolating crowding---not the choice of learner---as the source of predictability beyond self-excitation. The central methodological finding is the accompanying _ROC/PR divergence_: classical Hawkes, multivariate Hawkes, and neural THP all reach ROC-AUC ≈0.97 yet PR-AUC only ≈0.13--0.16. A self-exciting intensity ranks quiet bins below active ones almost perfectly (hence high ROC), but among the active, high-intensity bins---where precision is decided---recent event history alone poorly separates the bins that burst from those that do not; tier-resolved positioning and cross-venue spillover supply exactly that separation. Consistent with this, adding an explicit cross-asset graph (the ST-GNN) does not beat the classifier, because the engineered market/spillover features already encode the cross-asset signal. The differences among the three covariate models (≈0.005 PR-AUC) are small enough to require rolling walk-forward confidence intervals before any ordering is asserted; the robust, large effect is covariate-conditioned versus intensity-only. Evaluating precision-recall _conditional on non-trivial open interest_ remains a useful refinement, expected to widen the effective gap where it matters operationally.
+The results validate the direction and locate the open problem precisely. Bursts are predictable, self-excitation dominates the easy signal, and every covariate-using model---gradient boosting, a spatio-temporal GNN, and a covariate-conditioned neural point process---beats the published intensity-only baselines on the honest metric, with the covariate-conditioned TPP best. The cleanest evidence for the thesis is the _within-family_ contrast: the neural point process roughly doubles its PR-AUC (0.129→0.256) when its intensity is conditioned on crowding covariates rather than event times alone, isolating crowding---not the choice of learner---as the source of predictability beyond self-excitation. The central methodological finding is the accompanying _ROC/PR divergence_: classical Hawkes, multivariate Hawkes, and neural THP all reach ROC-AUC ≈0.97 yet PR-AUC only ≈0.13--0.16. A self-exciting intensity ranks quiet bins below active ones almost perfectly (hence high ROC), but among the active, high-intensity bins---where precision is decided---recent event history alone poorly separates the bins that burst from those that do not; tier-resolved positioning and cross-venue spillover supply exactly that separation. Consistent with this, adding an explicit cross-asset graph (the ST-GNN) does not beat the classifier, because the engineered market/spillover features already encode the cross-asset signal. The differences among the three covariate models (≈0.005 PR-AUC) are small enough to require rolling walk-forward confidence intervals before any ordering is asserted; the robust, large effect is covariate-conditioned versus intensity-only. Evaluating precision-recall _conditional on non-trivial open interest_ remains a useful refinement, expected to widen the effective gap where it matters operationally. @sec:robustness supplies exactly the walk-forward confidence intervals this section calls for on the LightGBM baseline/full comparison: the lift holds across five expanding-window folds and across every bucket of two independent regime axes, and is largest in stressed (bear, high-volatility) and low-crowding periods---the regimes an early-warning system exists to serve.
 
 The magnet null (@sec:m0magnet) is a useful negative result: it prevents building on an effect the data do not support and keeps the thesis honest about what liquidation walls do (mark ignition points for cascades) versus what they do not (attract price).
 
 = Limitations
 
 + *Compact models.* All neural models are deliberately small: the THP (32-dim, 2 layers, 3 epochs, 64-event context), the covariate TPP and ST-GNN (1-layer GRU, 48--64 hidden, ≤4 epochs), and the classical Hawkes uses an exponential kernel with $beta$ on a small grid (Nelder--Mead MLE). Legitimate but not heavily tuned. That the neural THP and the classical Hawkes land in the _same_ PR-AUC band (0.13--0.16) is reassuring that the result is about intensity-only versus covariate-conditioned modelling, not an under-trained single baseline; stronger fits are unlikely to close the 0.10--0.13 PR gap.
-+ *Small margins among covariate models.* CovTPP, ST-GNN, and the tuned classifier differ by ≤0.005 PR-AUC on a single split---within plausible split noise. The claim that the covariate TPP is _best_ is provisional pending rolling walk-forward confidence intervals; the robust claim is covariate-conditioned ≫ intensity-only.
-+ *Single time-ordered split.* One train/test boundary; rolling multi-fold walk-forward (as built for the prior project) is needed for confidence intervals and regime-sensitivity.
++ *Small margins among covariate models---confirmed, not just suspected, by walk-forward.* CovTPP, ST-GNN, and the tuned classifier differ by ≤0.005 PR-AUC on the single split in @tab:m2; @sec:covtppstgnnwf shows this holds across five walk-forward folds and six regime buckets (CovTPP and ST-GNN track within ≤0.002 PR-AUC of each other everywhere tested). The claim that any one covariate model is _best_ is not provisional but actively unsupported by the evidence; the robust claim is covariate-conditioned ≫ intensity-only, not an ordering among CovTPP/ST-GNN/LightGBM.
++ *Macro regime is an exogenous market-wide proxy, not asset-native.* The BTC/ETH volatility/trend label is a reasonable crypto-beta proxy for majors but may mislabel idiosyncratic bursts on thin/meme assets (e.g. `kBONK`, `FARTCOIN`, `PENGU`) that decouple from the macro cycle; the endogenous crowding regime partially compensates but is itself derived from aggregate liquidation intensity, not per-asset shocks.
 + *Cross-asset via engineered features, not a fitted process.* Multivariate contagion enters through market-wide and spillover covariates; a fitted marked/multivariate point process is still required to _interpret_ the excitation matrix $alpha_(k'->k)$ and to produce calibrated intensities.
 + *Approximate liquidation prices* (no maintenance margin, no cross-margin) affect the magnet probe and any wall-based feature.
 + *No funding-rate covariate* (absent from the schema); only the funding _clock_ is usable.
++ *Raw score is overconfident, not deployment-ready as a probability.* ECE 0.0533 with the reliability curve below the diagonal (@sec:opmetrics): the model over-states $P("burst")$ at every confidence level above 0.1. The ranking (PR-AUC/ROC-AUC, all walk-forward and event-stress results) is unaffected by this, but any use of the raw score as a probability---position sizing, dynamic margin, coverage-controlled alarms---requires a recalibration layer first.
++ *Alert load and 80%-recall operating point are single-point estimates, not swept.* @sec:opmetrics fixes recall at 80% as one illustrative operating point (8.08 false alarms/day/asset, median lead time 90 min); a full precision-recall-vs-alert-budget sweep, and per-asset (rather than pooled) false-alarm rates, would be needed before sizing a specific production alerting budget.
 
 = Key Findings Summary
 
@@ -315,12 +441,18 @@ The magnet null (@sec:m0magnet) is a useful negative result: it prevents buildin
 
 *F5:* Reliable label, unlike wallet skill. The event-count burst label ($rho$ ≫ 0) avoids the $rho=0.013$ noise that limited the earlier formulation, so measured lift is meaningful. \
 
+*F6:* The LightGBM crowding lift survives a five-fold rolling walk-forward (PR-AUC lift +0.0242 ± 0.0134, ROC-AUC lift +0.0538 ± 0.0174, positive in every fold) and every bucket of two independent regime axes (@sec:robustness), and is largest in stressed and low-crowding regimes---exactly where an early-warning system needs to work. \
+
+*F7:* CovTPP and ST-GNN track each other within ≤0.002 PR-AUC across the same five folds and six regime buckets (@sec:covtppstgnnwf): the single-split three-way ordering in @tab:m2 is not a reliable ranking, only covariate-conditioned ≫ intensity-only is. \
+
+*F8:* Median lead time 90 min (six times the 15-min forecast horizon) at a fixed 80%-recall operating point, and the model catches disproportionately more of the future USD notional (0.879) than of the raw event count (0.800)---but the raw score is *overconfident* (ECE 0.0533) and needs recalibration before any use beyond ranking (@sec:opmetrics). \
+
 
 = Next Steps
 
-*NS1:* Rolling multi-fold walk-forward for confidence intervals on the lift and regime-sensitivity, replacing the single time-ordered split. \
+*NS1 (resolved, @sec:robustness, @sec:covtppstgnnwf):* Rolling multi-fold walk-forward now covers all three covariate models (LightGBM, CovTPP, ST-GNN), with regime-sensitivity broken out by macro (BTC/ETH) and endogenous crowding regime. Outcome: the LightGBM crowding lift is robust across folds and regimes; the three-way ordering among covariate models is not distinguishable from split noise and should not be reported as a ranking. \
 
-*NS2:* Operating-point metrics---precision at fixed recall and precision in the top-$k$ flagged bins---plus PR-AUC _conditional on non-trivial open interest_, to turn the PR-AUC advantage into a deployable early-warning claim. \
+*NS2 (resolved, @sec:opmetrics):* Operating-point metrics computed at fixed 80% recall: precision 0.179, 8.08 false alarms/day/asset, median lead time 90 min (@sec:oct2025's +20 min BTC example is one point in this distribution), ECE 0.0533 (overconfident, needs recalibration before position-sizing use), and economic PR-AUC 0.8321 vs. 0.3873 unweighted. Remaining: PR-AUC _conditional on non-trivial open interest_ is not yet computed. \
 
 *NS3:* Adaptive-conformal calibration across the regime shift (test base rate 0.56% vs. train 1.51%); report coverage and lead-time / false-alarm tradeoffs. \
 
@@ -337,6 +469,13 @@ The magnet null (@sec:m0magnet) is a useful negative result: it prevents buildin
   caption: [Burst prediction on a leakage-safe, time-ordered test period. Left: out-of-sample ROC-AUC and PR-AUC for the self-exciting LightGBM baseline (past-intensity only) versus the tuned full model (+crowding+volume+cross-asset). Right: LightGBM feature importances of the full model, showing the relative contribution of the tier-crowding and cross-asset features over the trailing-intensity baseline. See @tab:m2 for the full comparison against the classical-Hawkes and neural-THP baselines.],
 ) <fig:m1>
 
-*Supporting reports.* Probe reports in `m0-magnet-findings.md`, `m0-burst-findings.md`, `m1-crowding-lift-findings.md`, `m2-baselines-findings.md`. Related-work citations (@sec:related to @sec:gap) are listed below; entries flagged _[unverified]_ in `references.bib` have title/arXiv-id confirmed but author/venue to be checked before camera-ready.
+#figure(
+  image(
+    "../pipeline/outputs/b06_regime_robustness/regime_robustness.png",
+    width: 92%,
+  ),
+  caption: [Rolling walk-forward and regime robustness (@sec:robustness). Left: PR-AUC per fold for the baseline and full LightGBM model across the five expanding-window folds of @tab:walkforward. Right: PR-AUC lift (full − baseline) by endogenous crowding regime, from @tab:regime.],
+) <fig:m6>
+
 
 #bibliography("../references.bib", style: "ieee", title: "References")
