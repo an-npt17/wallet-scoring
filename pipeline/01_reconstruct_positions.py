@@ -11,6 +11,7 @@ Output: data/processed/positions.parquet
 Run:
     uv run python pipeline/01_reconstruct_positions.py
 """
+
 import asyncio
 import logging
 import time
@@ -24,7 +25,9 @@ from pipeline._report import get_output_dir, save_fig, tee_stdout
 from src.db import init_db
 from src.features.position_builder import PositionBuilderService
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)s  %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s  %(levelname)s  %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 
@@ -43,7 +46,11 @@ async def _run(out_dir: Path) -> None:
         win_rate = float(positions["win"].mean() or 0.0)
         logger.info(
             "Reconstructed %s positions in %.1fs — Long %s  Short %s  WR %.3f",
-            f"{len(positions):,}", elapsed, f"{n_long:,}", f"{n_short:,}", win_rate,
+            f"{len(positions):,}",
+            elapsed,
+            f"{n_long:,}",
+            f"{n_short:,}",
+            win_rate,
         )
         pbar.update()
 

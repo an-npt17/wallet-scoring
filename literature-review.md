@@ -1,88 +1,154 @@
-# Literature Review: Tier-Aware Crowding and Early Warning of Synchronized Liquidation Bursts in On-Chain Perpetual Futures
+# Literature Review: Liquidation Burst in DeFi
 
-**Branch:** `liquidation-burst` · **Date:** July 2026 · **Author:** MSc Computer Science Thesis
+## 1. Introduction
 
-> Scope note. This review was assembled via WebSearch (Zotero MCP was unavailable in
-> this session). arXiv IDs and venues are recorded in `references.bib`; entries added
-> in the last search pass (2025–2026 preprints) are flagged there as requiring
-> author/DOI verification before camera-ready.
+Liquidation bursts in Decentralized Finance (DeFi) represent a critical systemic risk where automated liquidation mechanisms, designed to maintain protocol solvency, can trigger cascading failures that amplify market volatility. This review examines 15 research papers covering theoretical modeling, empirical analysis, and case studies of major liquidation events. The literature spans oracle manipulation, MEV extraction, network contagion, and protocol design, revealing both the mechanisms that drive cascades and potential mitigation strategies.
+
+## 2. Theoretical Foundations
+
+### 2.1 Liquidation Dynamics and Transaction Fees
+
+Sadeghi & Feinstein (2026) characterize optimal liquidation strategies from a profit-maximizing liquidator's perspective using dynamic programming. Their key contribution is demonstrating that CPMM transaction fees serve a dual purpose: compensating liquidity providers and endogenously hardening oracles against manipulation. They prove that fees above a critical threshold can completely eliminate Oracle Extractable Value (OEV) attacks, providing closed-form liquidation bounds that establish security parameters for AMM-based oracles.
+
+### 2.2 Liquidation Mechanism Design
+
+Tian & Zhu (2025) compare fixed-spread and auction-based liquidation mechanisms through a theoretical framework and empirical analysis. Their findings reveal a nuanced relationship: auctions mitigate price impact when liquidator participation costs are low, but amplify it when costs are high. The competition effect (more participants driving up liquidation prices) versus the entry effect (more liquidators increasing total liquidation volume) determines which mechanism performs better. This work establishes that liquidation design choices have direct implications for market stability and fire-sale risks.
+
+### 2.3 Ergodic Optimal Liquidations
+
+The ergodic control problem for DeFi liquidations (2026) addresses how decentralized derivatives exchanges should manage disposal of positions accrued through liquidations. By formulating the problem as maximizing long-term average reward subject to inventory penalties, the authors derive closed-form solutions showing the optimal strategy is to dispose of a fraction of inventory per unit time. This approach minimizes price impact and provides a framework for exchanges to optimize insurance pool P&L.
+
+## 3. Empirical Analysis
+
+### 3.1 Aave V3 Lending Dynamics
+
+Chiu & Danisman (2026) provide comprehensive transaction-level analysis of Aave V3, the largest DeFi lending protocol by TVL. Their findings reveal:
+
+- **Revenue Concentration**: Protocol earnings heavily concentrated in WETH, USDT, and USDC (83% of earnings)
+- **Leverage Behavior**: Margin trading accounts for ~20% of borrowing volume despite overcollateralization requirements
+- **Liquidation Patterns**: Liquidations occur in concentrated waves; the 10 largest waves account for 80% of total liquidated volume
+- **Asset Concentration**: Only 4 tokens (WETH, wstETH, WBTC, weETH) account for 90% of liquidated value
+- **Borrower Losses**: Realized losses including liquidation penalties and missed price recoveries amount to 10-30% of liquidated value
+
+The paper documents that liquidations are primarily triggered by rapid collateral price declines rather than debt increases, establishing that DeFi lending faces fundamental constraints related to capital efficiency and systemic fragility.
+
+### 3.2 Network Shock Propagation
+
+Tovanich et al. (2025) study shock propagation through Compound's lending network using the DebtRank algorithm. Their analysis of daily balance sheets from January 2020 to June 2024 demonstrates that network topology is the most robust predictor of contagion, outperforming standard financial indicators. Key findings include:
+
+- Stablecoin pools exhibit more concentrated and persistent vulnerabilities than crypto-asset pools
+- Systemic risk structure varies over time and across asset types
+- Topology-aware risk monitoring is essential for algorithmic credit systems
+
+### 3.3 Systemic Fragility
+
+Lehar & Parlour (2022) analyze collateral liquidations on Compound and Aave, documenting temporary and permanent price impacts across nine decentralized exchanges. Their work establishes the fundamental feedback loop: liquidations → price pressure → more liquidations. They show that flash loans enable permissionless liquidation, amplifying systemic fragility by allowing anyone to become a liquidator without capital requirements.
+
+## 4. Case Studies
+
+### 4.1 October 10, 2025 Cascade
+
+The October 10, 2025 cascade represents the largest single-day liquidation event in crypto history (Aegis Markets, 2025):
+
+- **Scale**: $19.37 billion in leveraged positions liquidated across centralized and decentralized exchanges
+- **Speed**: 70% of liquidations occurred in 40 minutes (20:50-21:30 UTC)
+- **Intensity**: $3.21 billion evaporated in a single minute (21:15 UTC)
+- **Acceleration**: Liquidation rate increased 86x from pre-cascade baseline
+- **Infrastructure Collapse**: Order book depth collapsed by 98%, Bitcoin perpetual swap spreads widened 1,321x
+- **Stablecoin Impact**: USDe stablecoin depegged to $0.65, amplifying the cascade
+
+The cascade was driven by oracle-dependent liquidation logic creating reflexive feedback loops. Every protocol using price-based liquidation thresholds and oracle-dependent triggers participated in the cascade dynamics.
+
+### 4.2 Stream Finance xUSD Collapse
+
+The Stream Finance collapse (BlockEden, 2025) demonstrates cross-protocol contagion:
+
+- **Initial Loss**: $93 million loss from external fund manager failure
+- **Contagion**: Cascaded to $285 million in cross-protocol exposure
+- **Depeg**: xUSD collapsed 77% from $1.00 to $0.26
+- **Systemic Impact**: Elixir's deUSD lost 98% of value, major lending protocols faced liquidity crises
+
+The collapse exposed critical vulnerabilities: off-chain counterparty risk, oracle hardcoding preventing proper liquidations, and the double-edged nature of DeFi composability. Protocols had hardcoded xUSD's oracle price at $1.00 to prevent cascading liquidations, but this created massive bad debt when the token depegged.
+
+### 4.3 stETH Depeg Cascade
+
+The July 2025 stETH/Aave cascade (OAK Framework) illustrates withdrawal-queue-depth saturation:
+
+- **Trigger**: Single-actor liquidity withdrawal (~$1.7B from Aave's wETH pool)
+- **Propagation**: Aave borrow-rate spike → looped-leverage carry-flip → forced deleveraging
+- **Queue Saturation**: Beacon Chain validator-exit queue reached 743k ETH
+- **Market Impact**: stETH/ETH traded at 0.3-0.6% discount
+
+This case demonstrates that post-Shapella structural fixes do not retire the cascade surface—they retire specific sub-classes while queue-depth-saturation remains operational.
+
+## 5. MEV and Oracle Manipulation
+
+### 5.1 Blockchain Extractable Value
+
+Qin et al. (2021) quantify $540.54M extracted over 32 months through sandwich attacks, liquidations, and DEX arbitrage. Their work establishes that BEV deteriorates blockchain consensus security, with a rational miner with 10% hashrate willing to fork if BEV exceeds 4× the block reward. They introduce the first concrete algorithm for generalized trading bots, demonstrating application-agnostic transaction replay.
+
+### 5.2 Speculative Oracle Extractable Value
+
+Sevim & Torres (2026) identify speculative OEV across Layer-2 blockchains. On October 10, 2025, they detected 64 speculative liquidators on Aave (57% of all detected liquidators) and 831 successful speculative liquidations across Arbitrum, Base, and Optimism. Their analysis reveals that independent Chainlink DONs consume identical off-chain price data nearly simultaneously yet publish updates at different times, creating statistically predictable cross-chain exploitation windows.
+
+### 5.3 The Liquidation Economy
+
+Obafemi (2026) analyzes the structural features of the "liquidation economy":
+
+- **Leverage as Infrastructure**: Perpetual futures turned leverage into a structural feature
+- **Natural Brakes Removed**: Stablecoins eliminated traditional market circuit breakers
+- **Concentration**: 569 bots compete for liquidations, but 91% are unprofitable
+- **MEV Impact**: Chainlink SVR has recaptured ~$16M in liquidation-related MEV from Aave
+
+## 6. Mitigation Strategies
+
+### 6.1 Dynamic Fees and Protocol-Owned Liquidity
+
+The October 10 cascade analysis suggests dynamic fee hooks that adjust based on volatility can protect LPs and reduce cascade severity. Protocol-owned liquidity hooks create permanent positions that cannot be withdrawn during stress events, providing a floor of liquidity depth.
+
+### 6.2 Agentic Liquidation Prevention
+
+Spadea & Seneviratne (2026) propose survival analysis agents that proactively prevent liquidations. Using Cox proportional hazards models, their agent differentiates between actionable financial risks and negligible events, executing protocol-faithful interventions to prevent "unsavable" liquidations with zero worsening rate.
+
+### 6.3 Oracle State Synchronization
+
+Oraclizer (2025) proposes continuous state synchronization to eliminate OEV at its source. By replacing discrete price updates with atomic state updates and preemptive lock mechanisms, the approach theoretically eliminates the temporal arbitrage windows that MEV bots exploit.
+
+## 7. Research Gaps
+
+### 7.1 Cross-Protocol Contagion Modeling
+Most studies focus on single protocols (Aave, Compound). The Stream Finance case demonstrates $93M losses cascading to $285M across protocols, but formal models of cross-protocol risk propagation remain underdeveloped.
+
+### 7.2 Real-Time Cascade Prediction
+Current approaches are reactive (triggered by price drops). While survival analysis shows promise (Spadea & Seneviratne, 2026), scalable real-time prediction systems that capture cascade dynamics before they occur are needed.
+
+### 7.3 Adaptive Liquidation Mechanisms
+Fixed-spread vs. auction mechanisms are studied separately. Research on hybrid mechanisms that dynamically adjust based on market conditions, participation costs, and systemic risk indicators is limited.
+
+### 7.4 Cross-Chain Liquidation Dynamics
+Most research focuses on Ethereum mainnet. Liquidation behavior on L2 rollups, cross-chain MEV opportunities, and coordinated liquidation across chains are understudied despite evidence of cross-chain exploitation windows (Sevim & Torres, 2026).
+
+### 7.5 Oracle Design for Cascade Resilience
+Oracle manipulation as an MEV vector is well-documented, but oracle architectures that provide timely price feeds while minimizing cascade amplification potential are needed. The tension between oracle latency and security requires novel approaches.
+
+### 7.6 Systemic Risk Metrics
+DebtRank applied to DeFi networks (Tovanich et al., 2025) shows topology matters, but real-time systemic risk monitoring that captures cascade potential across interconnected protocols remains undeveloped.
+
+## 8. Future Research Directions
+
+1. **Cross-Protocol Stress Testing**: Frameworks for evaluating systemic risk across interconnected DeFi protocols
+2. **Real-Time Circuit Breakers**: Mechanisms that can pause or slow liquidations during cascade events without compromising protocol solvency
+3. **Adaptive Risk Parameters**: Liquidation thresholds, bonuses, and oracle update frequencies that adjust based on market conditions
+4. **Machine Learning for Prediction**: Models that predict liquidation cascades before they occur using on-chain data
+5. **Regulatory Frameworks**: Approaches to regulating DeFi stability without undermining decentralization
+6. **Cross-Chain Coordination**: Protocols for managing liquidation dynamics across L1 and L2 environments
+
+## 9. Conclusion
+
+The literature reveals that liquidation bursts in DeFi are not isolated events but structural features of current protocol designs. The feedback loops between liquidations, price impacts, and oracle updates create systemic fragility that can be triggered by single events (Stream Finance) or macro shocks (October 10, 2025). While mitigation strategies exist—dynamic fees, protocol-owned liquidity, agentic prevention—the fundamental tension between protocol solvency and market stability remains unresolved. Future research must address cross-protocol contagion, real-time prediction, and adaptive mechanisms to build a more resilient DeFi ecosystem.
 
 ---
 
-## 1. Motivation and Problem Setting
+## References
 
-Perpetual futures ("perps") are the dominant crypto derivative, with daily volume regularly exceeding \$100B, and are increasingly the venue where *price discovery* happens (spot follows perps). Their defining risk is the **liquidation cascade**: once a cluster of leveraged positions breaches maintenance margin, forced liquidations sell into the market, push price further, and trip the next layer of leveraged positions — a self-exciting, contagious unwind. Practitioners already treat crowded positioning (extreme funding rates, long/short imbalance, record open interest) as informal early-warning signals, but these are heuristic thresholds ("funding > 15% APR"), not calibrated predictive models.
-
-This thesis proposes to (a) engineer **tier-aware crowding and co-positioning-graph features** from on-chain perp event streams, (b) forecast **synchronized liquidation bursts** with a **marked/multivariate self-exciting point process** whose intensity is modulated by those features, and (c) deliver **calibrated, drift-aware early warnings** using adaptive conformal prediction. The available database (`perpetuals_knowledge_graph`) records 1.34M closed positions across 249 assets and 5 venues over 491 days, with 190,583 explicit `Liquidate` events — a dense, self-supervised label source, in contrast to the noise-dominated win-rate labels that limited the prior wallet-scoring effort.
-
-Five literature pillars support the design.
-
----
-
-## 2. Pillar 1 — Liquidation Cascades and Self-Exciting Dynamics
-
-Self-exciting (Hawkes) processes are the canonical model for event contagion in finance: the arrival of one event transiently raises the intensity of further events via an (often exponential) triggering kernel [Bacry et al., 2015]. Reflexivity — the degree to which market activity is endogenously self-generated rather than driven by exogenous news — has been quantified through the branching ratio of Hawkes fits and proposed as a flash-crash precursor [Filimonov & Sornette, 2012].
-
-Directly adjacent, **Cao & Palaash (2025)** fit a **3-variate Hawkes process to cross-protocol DeFi liquidation clustering** (Aave V3, Compound V3, Morpho), estimating exponential triggering kernels via MLE on ~7,500 on-chain liquidation events (2023–2025). This is the closest prior work and the primary methodological baseline to beat. **Crucially, it differs from this thesis on three axes**: (i) it models *DeFi lending* liquidations (collateral health-factor breaches), not *perpetual-futures* margin liquidations; (ii) events are aggregated at the *protocol* level, with no wallet-tier structure or positioning covariates; and (iii) it is a *descriptive* clustering model, not a *calibrated predictive* early-warning system evaluated by lead time / false alarms. A modulated-renewal Hawkes variant has also been applied to extreme mid-price drops on cryptocurrencies [UNSW thesis], and Markov-modulated Hawkes to high-frequency manipulation detection [arXiv:2502.04027], confirming that regime-switching intensities matter in this domain.
-
-**Takeaway.** The Hawkes family is the correct mechanistic prior, and a strong published baseline exists — but no one has fit a *perp*, *tier-marked*, *covariate-modulated* liquidation point process.
-
----
-
-## 3. Pillar 2 — Perp Microstructure, Crowding, and Funding as Early-Warning Signals
-
-Microstructure work frames the cascade mechanism precisely: crowding thins the market's "error bars," so a modest (1–5%) adverse move breaches maintenance margins, and forced market orders deepen the move and trigger the next layer [perp-microstructure practitioner literature, 2026]. Funding rates and open interest are the standard crowding proxies; Granger-causality studies report that *extreme* funding has predictive value for subsequent moves, and the recent **Slippage-at-Risk (SaR)** framework [arXiv:2603.09164] builds a *forward-looking* liquidity-risk measure for perp exchanges.
-
-**Gap for this thesis.** These signals are venue-level, funding-rate-dependent, and heuristic. The `perpetuals_knowledge_graph` schema exposes something richer and finer: per-event `size_usd`, `side`, `leverage`, `owner_account`, and timestamp in `logs`, plus a market-wide `aggregated_assets` snapshot that already defines **small/medium/large wallet tiers** with long/short size and count percentages. This permits *tier-resolved* crowding features (small-vs-large disagreement, tier imbalance, positioning concentration, consensus velocity) that funding rate alone cannot express. Note two schema constraints, addressed in the proposal: (i) `aggregated_assets` is a *snapshot* (no timestamp), so the crowding *time series* must be reconstructed from `logs`; (ii) **no funding-rate field exists**, so funding enters only as a known *event-time clock* (hourly / 8-hourly windows), not an observed covariate.
-
----
-
-## 4. Pillar 3 — Marked and Neural Point Processes
-
-Beyond parametric Hawkes, neural point processes learn flexible conditional-intensity functions with RNNs, transformers, and state-space models [neural STPP, Zhou et al., 2022; Transformer/Mamba Hawkes, arXiv:2407.05302], and recent work targets *multi-event* forecasting on spatiotemporal point processes [Beyond Hawkes, arXiv:2211.02922]. Marks (event covariates such as wallet tier, asset, venue) let a single process model heterogeneous events and cross-type excitation.
-
-**Relevance.** The proposed model treats each liquidation as a *marked* event (mark = wallet tier × asset × venue), enabling cross-tier and cross-venue excitation — e.g. large-wallet liquidations exciting small-wallet liquidations, or Hyperliquid unwinds exciting Jupiter unwinds. Parametric marked Hawkes is the primary model; a neural-intensity variant is a stretch extension, benchmarked against it rather than assumed superior.
-
----
-
-## 5. Pillar 4 — Topology of On-Chain Transaction / Positioning Graphs
-
-Topological Data Analysis (TDA) on dynamic blockchain networks captures structural change (connected components, loops, higher-order voids) that precedes price anomalies. Persistent-homology methods detect anomalies in dynamic multilayer blockchain networks [Ofori-Boateng et al., 2021], predict extreme **XRP price surges from topological features** [arXiv:2603.18021], and a **hierarchical persistence-velocity** method targets crypto-market network anomalies [arXiv:2512.14615].
-
-**Caveat honestly stated.** These works use *native transaction graphs* (address-to-address transfers). This database has **no counterparty edges** — perp positions are wallet-vs-protocol. Therefore this thesis constructs a **co-positioning graph** (wallets sharing asset + side + time window form edges) and extracts centrality / persistence features of the *crowd's* structure. This is a weaker topological object than a transfer graph, so graph features are proposed as an *ablation-tested add-on*, not the core claim — the review is explicit that the TDA-on-transaction-graph novelty does not transfer wholesale.
-
----
-
-## 6. Pillar 5 — Calibrated Prediction Under Distribution Shift
-
-Real-time early warning must stay calibrated as regimes change. **Adaptive Conformal Inference** [Gibbs & Candès, 2021] updates the miscoverage level online — widening intervals after a miss, narrowing after a hit — to control long-run coverage under distribution shift without modeling the shift. **Adaptive Conformal Predictions for Time Series** [Zaffran et al., 2022] extends this to dependent series, and drift-aware / spectral variants handle non-exchangeable streaming data [arXiv:2606.15953]. Conformal anomaly detection with time-series foundation models has also emerged [arXiv:2604.20122].
-
-**Relevance.** A liquidation-burst warning is only actionable if its probability is *calibrated* and stays calibrated across bull/bear/chop regimes. Wrapping the point-process (or classifier) output in adaptive conformal gives calibrated alarm intervals and a principled lead-time / false-alarm tradeoff — a contribution orthogonal to, and stackable on, the intensity model.
-
----
-
-## 7. Synthesis and Identified Gaps
-
-| # | Gap | Evidence it is open |
-|---|-----|---------------------|
-| **G1** | No **tier-structured, covariate-modulated** liquidation point process for **perps** | Cao & Palaash (2025) is protocol-level DeFi-lending, descriptive, no tiers/covariates |
-| **G2** | Crowding early-warning is **heuristic** (funding/OI thresholds), not a **calibrated predictive model** | Funding-rate signals are Granger-causal heuristics; SaR is liquidity-risk, not burst prediction |
-| **G3** | **Cross-tier / cross-venue excitation** of liquidation bursts is unstudied | Hawkes-finance work is single-asset or single-protocol |
-| **G4** | No **calibrated, drift-aware** early-warning with lead-time / false-alarm benchmarks in this domain | ACI/time-series conformal exist but are unapplied to on-chain liquidation bursts |
-| **G5** | Positioning-**graph topology** as intensity covariate is unexplored (with honest limits) | TDA-on-blockchain uses transfer graphs; co-positioning graph is novel but weaker |
-
-**Positioning.** The thesis's defensible core is **G1 + G2 + G4**: a perp, tier-marked, crowding-modulated self-exciting model delivering *calibrated* liquidation-burst early warnings, benchmarked against (i) the practitioner funding/imbalance heuristic, (ii) standard learners (logistic, gradient boosting), and (iii) the published multivariate-Hawkes baseline adapted to perps. G3 and G5 are higher-risk extensions carried as ablations.
-
-**Why this fits the data (and avoids the prior project's failure).** The prior wallet-scoring work collapsed because its evaluation label (future win rate) was ~99% sampling noise. The label here — a synchronized liquidation/close burst in the next 5/15/60 minutes — is an **event count**, dense (190k liquidations) and self-supervised, so measurable model improvement is achievable and reviewer-defensible.
-
----
-
-## 8. Key References (full entries in `references.bib`)
-
-- Bacry, Mastromatteo, Muzy (2015) — *Hawkes processes in finance*.
-- Filimonov & Sornette (2012) — *Quantifying reflexivity … prediction of flash crashes*.
-- Cao & Palaash (2025) — *DeFi liquidations cluster across protocols: a multivariate Hawkes framework* (closest prior work / primary baseline).
-- Zhou et al. (2022) — *Neural point process for spatiotemporal event dynamics*; *Beyond Hawkes* (2022).
-- Ofori-Boateng et al. (2021) — *Topological anomaly detection in dynamic multilayer blockchain networks*; XRP topological anomaly prediction (2026).
-- Gibbs & Candès (2021) — *Adaptive conformal inference under distribution shift*; Zaffran et al. (2022) — *Adaptive conformal predictions for time series*.
-- Slippage-at-Risk (2026); Markov-modulated Hawkes manipulation detection (2025).
+See `references.bib` for complete BibTeX entries.
